@@ -10,3 +10,7 @@ dist/
 !.env.example
 .coverage
 htmlcov/
+node_modules/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
