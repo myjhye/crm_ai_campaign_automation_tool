@@ -1,0 +1,668 @@
+# GrowthPilot 단계별 상세 구현 계획
+
+작성일: 2026-09-14  
+기준 문서: [제품 요구사항 및 전체 구현 계획](implementation_plan.md)  
+목적: 요구사항을 실제 개발 티켓으로 나누고, 각 작업의 구현 방법·산출물·검증 기준을 정한다.
+
+이 문서는 구현 예정 설계다. 아래 체크박스는 실제 개발과 검증이 끝났을 때 완료 처리한다. 원문에서 정하지 않은 값은 **MVP 기본안**이며, 제품 요구사항이 바뀌면 관련 테스트와 함께 변경한다.
+
+## 1. 출발점과 구현 범위
+
+### 1.1 현재 구현된 것
+
+- `app/main.py`: FastAPI 앱 팩토리, CORS, 루트 API.
+- `app/core/config.py`: 환경변수 설정.
+- `app/api/router.py`: `/api/v1` 공통 경로.
+- `app/api/routes/health.py`: 프로세스 상태 확인.
+- `tests/test_api.py`: HTTP 응답, 문서, CORS 테스트.
+- `pyproject.toml`, `.env.example`, `README.md`: 설치 및 실행 기반.
+
+아직 DB, 인증, 업무 API, 프런트엔드, AI 연동은 없다. 기존 `app/`를 그대로 확장하고 프런트엔드만 `frontend/`에 추가한다. 패키지 설치로 생성되는 `*.egg-info/`나 `.venv/` 내부는 수정 대상이 아니다.
+
+### 1.2 완성할 사용자 흐름
+
+로그인 → 샘플 데이터 적재 → 대시보드 확인 → 세그먼트 미리보기와 저장 → 캠페인·A/B 카피 작성 → 정책 검수 → 담당자 승인 → 모의 발송 → 성과 비교 → AI 요약과 후속 초안 생성.
+
+처음에는 수동 입력으로 이 흐름을 완성한다. AI는 이미 검증된 서비스 함수를 호출하는 방식으로 붙인다. 이메일을 첫 번째 수직 구현 대상으로 삼고, 최종 MVP에는 푸시와 SMS의 카피·채널별 검수·모의 발송도 포함한다.
+
+### 1.3 원문과의 차이 및 보완 결정
+
+| 항목 | 실제 구현 기본안 | 이유 |
+| --- | --- | --- |
+| API 경로 | 모든 업무 API를 `/api/v1`에 배치 | 기존 프로젝트와 일치 |
+| JSON 이름 | 요청·응답 모두 `snake_case` | Python 모델과 프런트 타입의 변환 혼선 방지 |
+| 구매 정보 | `orders`, `order_items`, `products` 추가 | 재구매·카테고리·매출 계산의 원천 필요 |
+| 수신 동의 | 채널별 동의와 연락처 상태 추가 | 단일 boolean으로 이메일·푸시·SMS 동의를 대신하지 않음 |
+| 감사 기록 | AI 로그와 별도로 `audit_logs` 추가 | 수동 변경과 승인도 기록 |
+| 승인 근거 | 검수 결과와 대상자 스냅샷을 버전별 저장 | 승인 당시 내용 재현 |
+| 작업 처리 | PostgreSQL 작업 테이블과 별도 worker | 프로세스 재시작 시 작업 복구 |
+| 예약·중지 | `SCHEDULED`, `PAUSED` 전환은 2차 확장 | 원문 MVP 제외 범위와 정합성 유지 |
+| 실험 통계 | A/B 비교는 MVP, 무발송 통제군은 확장 | 통제군 없이 증분 효과를 주장하지 않음 |
+| RAG·MCP | MVP 후 별도 단계 | 기본 업무 흐름의 선행 조건이 아님 |
+
+## 2. 전체 작업 순서와 의존성
+
+| 단계 | 목표 | 선행 단계 | 사용자에게 확인 가능한 결과 |
+| --- | --- | --- | --- |
+| 0 | 공통 계약 고정 | 현재 기반 | API·지표·상태 규칙 문서 |
+| 1 | DB·마이그레이션·작업 기반 | 0 | DB 연결과 재시작 가능한 작업 |
+| 2 | 로그인·역할·감사 | 1 | 권한에 따른 조회와 승인 차단 |
+| 3 | 데이터 적재·샘플 생성 | 1, 2 | CSV 적재와 재현 가능한 데이터 |
+| 4 | 프런트 공통 구조 | 0, 2 | 로그인과 메뉴 이동 |
+| 5 | 고객 조회·지표 | 3, 4 | 실제 데이터 기반 대시보드 |
+| 6 | 세그먼트 엔진·화면 | 5 | 조건별 고객 수 확인과 저장 |
+| 7 | 캠페인·카피 수동 편집 | 6 | A/B 캠페인 초안 |
+| 8 | 정책 검수·승인 | 7 | 제외 내역과 승인 기록 |
+| 9 | 모의 발송·이벤트 | 8 | 중복 없는 실행 결과 |
+| 10 | 성과·실험·보고서 | 9 | 계산 근거가 있는 성과 화면 |
+| 11 | AI 생성 기능 | 6, 7, 10 | 자연어 조건·카피·분석 |
+| 12 | 실행형 AI 패널 | 8, 11 | 사용자 확인 후 업무 실행 |
+| 13 | 배포·E2E·시연 | 0~12 | 끊기지 않는 전체 시나리오 |
+
+첫 번째 중간 목표는 6단계의 수동 세그먼트 생성이다. 두 번째는 10단계의 AI 없는 전체 운영 흐름이며, 세 번째가 12단계의 AI 연결이다. 단계 11의 조건 생성·카피 생성은 각각 6·7단계 완료 직후 착수할 수 있지만, 성과 분석은 10단계 결과를 사용한다.
+
+## 3. 목표 코드 구조와 책임
+
+```text
+app/
+  main.py
+  core/                 # 설정, 보안, 오류, 시간, 로깅
+  db/                   # engine, session, base
+  models/               # SQLAlchemy 영속 모델
+  schemas/              # API 요청·응답 모델
+  repositories/         # 쿼리와 데이터 저장
+  services/             # 트랜잭션과 업무 규칙
+  api/
+    deps.py             # DB 세션, 인증 사용자, 역할 검사
+    router.py
+    routes/             # auth, customers, imports, dashboard 등
+  domain/
+    segments/           # DSL, 컴파일, 필드 레지스트리
+    campaigns/          # 상태 전환, A/B 배분
+    policies/           # 검수 규칙과 사유 코드
+    analytics/          # 지표 정의와 계산
+  ai/                   # provider, schemas, prompts, tools, orchestrator
+  workers/              # 작업 claim, 실행, 재시도
+alembic/versions/
+scripts/                # 샘플 생성, 데모 사용자 생성
+tests/
+  unit/
+  integration/
+  fixtures/
+frontend/
+  src/
+    app/                # Router, QueryClient, 공통 레이아웃
+    api/                # API client와 생성 타입
+    components/         # 공통 표시 요소
+    features/           # auth, customers, segments, campaigns, reports, ai
+  e2e/
+docs/
+compose.yaml
+Dockerfile
+.github/workflows/ci.yml
+```
+
+요청 흐름은 `route → service → repository → DB`로 고정한다. 라우터는 검증·인증·응답에 집중한다. 여러 테이블을 함께 변경하는 트랜잭션은 서비스가 소유하고 repository에서 임의로 commit하지 않는다. AI 도구와 일반 화면은 같은 서비스를 재사용한다.
+
+DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작업을 수행하는 HTTP 핸들러는 동기 함수로 구성하고, AI 비동기 호출을 연결할 때 DB 작업을 이벤트 루프에서 직접 실행하지 않는다. 외부 AI 응답을 기다리는 동안 DB 트랜잭션을 유지하지 않는다.
+
+## 4. 단계 0 — 공통 계약과 업무 정의
+
+### 0-1. API 계약
+
+- [ ] `docs/api_contract.md`에 `/api/v1`, UUID, `snake_case`, 오류 형식을 정의한다.
+- [ ] 시간은 timezone이 있는 ISO 8601로 받고 UTC로 저장한다. 화면의 업무 시간대는 `Asia/Seoul`을 기본값으로 한다.
+- [ ] 기간 집계는 `[from, to)`로 한다. 화면의 종료일 포함 선택은 다음 날 자정의 배타적 상한으로 변환한다.
+- [ ] 목록은 `items`, `total`, `page`, `page_size`로 반환한다. 기본 20건, 최대 100건으로 제한한다.
+- [ ] 잘못된 입력 422, 미인증 401, 권한 없음 403, 없음 404, 상태·버전 충돌 409를 사용한다.
+- [ ] `error.code`, `error.message`, `error.details`, `request_id` 오류 응답을 구현한다. 검증 오류도 같은 형식으로 변환한다.
+- [ ] 금액은 DB `Numeric`과 Python `Decimal`을 사용하고 JSON에서는 문자열로 전달한다. 통화는 MVP에서 KRW로 고정한다.
+
+**완료 기준:** 프런트와 백엔드가 동일한 요청 예시·오류 예시를 사용하며, 빈 결과와 0 나누기의 표현이 정해져 있다.
+
+### 0-2. 기준 시점과 고객 상태
+
+- [ ] `docs/metric_definitions.md`에 계산 기준을 작성한다.
+- [ ] 서비스에 `reference_at` 또는 Clock 의존성을 전달해 테스트에서 시간을 고정한다.
+- [ ] MVP 상태 기본안: 탈퇴가 최우선, 가입 후 미구매 30일 미만은 ACTIVE, 30~59일은 CHURN_RISK, 60일 이상은 DORMANT. 구매 고객은 마지막 구매 기준으로 같은 30/60일 경계를 적용한다.
+- [ ] 상태와 별개로 활성 고객 KPI는 선택 기간에 VIEW·CART·PURCHASE 중 하나 이상 발생한 고객으로 정의한다. 상태 분포와 혼용하지 않는다.
+- [ ] `days_since_last_purchase`는 구매가 없으면 `null`로 처리한다. 휴면 VIP의 `GTE 60`에는 미구매 고객이 자동 포함되지 않는다.
+- [ ] 미래 이벤트는 기준 시점 집계에서 제외한다. 이벤트 시각과 실제 적재 시각을 구분한다.
+
+**완료 기준:** 29/30/59/60일, 자정, 미구매, 탈퇴 고객의 결과를 작은 고정 데이터로 설명할 수 있다.
+
+## 5. 단계 1 — DB와 실행 기반
+
+### 1-1. PostgreSQL 연결
+
+- [ ] `pyproject.toml`에 SQLAlchemy, Alembic, PostgreSQL 드라이버를 추가하고 설치 버전을 고정한다.
+- [ ] `compose.yaml`에 PostgreSQL, 볼륨, healthcheck를 정의한다.
+- [ ] `.env.example`에 `DATABASE_URL`을 추가한다. 실제 비밀번호를 커밋하지 않는다.
+- [ ] `app/db/session.py`에 engine과 session factory를 작성한다.
+- [ ] `app/api/deps.py`에서 요청 종료 시 세션을 닫고 실패 시 rollback한다.
+- [ ] `/health`는 프로세스 확인으로 유지하고 `/api/v1/ready`에서 DB 연결을 확인한다. DB 장애면 503을 반환한다.
+
+### 1-2. 모델을 의존 순서대로 추가
+
+| 마이그레이션 묶음 | 테이블 | 핵심 제약·추가 필드 |
+| --- | --- | --- |
+| 001 사용자 | `users`, `user_sessions`, `audit_logs` | email unique, password_hash, role, 세션 만료·폐기, actor/resource/action |
+| 002 고객 원천 | `customers`, `customer_channels`, `products`, `orders`, `order_items`, `customer_events` | external_id unique, 고객+채널 unique, 외부 주문·이벤트 ID unique |
+| 003 적재·작업 | `import_batches`, `jobs`, `dataset_versions` | job 상태, 재시도, 오류 요약, 데이터 버전 |
+| 004 세그먼트 | `segments`, `segment_revisions` | condition_json, version, reference_at, created_by, archived_at |
+| 005 캠페인 | `campaigns`, `campaign_variants`, `campaign_exclusions` | version, segment_revision_id, 채널, 쿠폰 만료, KPI, A/B 비율 |
+| 006 검수·승인 | `validation_runs`, `validation_recipients`, `approvals` | campaign_version, policy_version, data_version, 대상 집합, 결정자 |
+| 007 실행·성과 | `campaign_runs`, `campaign_deliveries`, `campaign_events` | idempotency key, 승인 ID, variant_id, event external_id, order_id |
+| 008 AI | `ai_execution_logs`, `ai_action_proposals` | 작업 종류, provider, 모델, 상태, 제안 payload/hash, 확인·만료 시각 |
+
+`customer_channels`에는 EMAIL/PUSH/SMS, 동의 여부·변경 시각, 연락처 또는 토큰, 유효성, hard bounce 상태를 둔다. 기존 `marketing_consent`를 수입할 때 이메일 동의로만 매핑하고 나머지 채널은 기본 미동의로 둔다.
+
+`orders`는 구매 지표의 원천이다. PURCHASE 이벤트는 주문 ID를 참조하고 매출에 다시 더하지 않는다. MVP는 완료 주문 금액을 사용하며 취소·전액 환불은 제외한다. 부분 환불은 미지원으로 명시하고 적재 시 오류로 처리한다.
+
+`customers`의 구매 합계·주문 수·최근 구매 시각은 파생 캐시다. 주문 적재 트랜잭션에서 영향받은 고객만 갱신하고, 별도 재계산 작업으로 원천과 비교한다. 원천 주문이 없는데 집계 숫자만 업로드하는 방식은 MVP에서 허용하지 않는다.
+
+### 1-3. 제약과 인덱스
+
+- [ ] FK, NOT NULL, 금액·비율 범위 CHECK를 작성한다.
+- [ ] 이벤트 `(customer_id, event_at)`, 주문 `(customer_id, purchased_at)`, 발송 `(customer_id, sent_at)`, 캠페인 이벤트 `(campaign_id, event_at)`에 인덱스를 둔다.
+- [ ] variant 이름은 캠페인 안에서 unique, 실행 결과는 `(run_id, customer_id)` unique로 둔다.
+- [ ] 변형 비율 합계는 서비스 트랜잭션에서 검사한다. 행 하나의 CHECK만으로 합계 검증을 대체하지 않는다.
+- [ ] Alembic upgrade를 빈 DB와 직전 버전 DB에서 검증한다. 운영 데이터에 downgrade를 자동 적용하지 않는다.
+
+### 1-4. 작업 worker
+
+- [ ] `jobs`에 PENDING/RUNNING/SUCCEEDED/FAILED, payload, attempt, available_at, lease_until, heartbeat를 둔다.
+- [ ] worker가 잠금으로 하나의 작업을 claim하고 주기적으로 lease를 갱신한다.
+- [ ] lease가 만료된 작업만 재처리한다. 작업별 unique 제약으로 재처리를 안전하게 만든다.
+- [ ] 작업 생성은 업무 변경과 같은 트랜잭션에 넣는다. `GET /api/v1/jobs/{id}`로 진행률을 제공한다.
+- [ ] `python -m app.workers.runner` 실행 진입점을 만든다. CSV 파싱·시뮬레이션을 HTTP 프로세스 메모리에만 보관하지 않는다.
+
+**산출물:** DB 설정, 001~003 우선 마이그레이션, readiness API, worker. 004 이후는 해당 업무 단계에서 추가한다.
+
+**완료 기준:** 빈 DB 설치 성공, FK/중복 위반 차단, DB 장애 시 readiness 실패, worker 강제 종료 후 재시작해 작업을 중복 없이 마친다.
+
+## 6. 단계 2 — 인증·권한·감사 이력
+
+### 2-1. 로그인과 세션
+
+- [ ] `core/security.py`, `models/user.py`, `schemas/auth.py`, `services/auth.py`, `routes/auth.py`를 만든다.
+- [ ] 비밀번호는 검증된 해시 라이브러리로 저장한다. 직접 암호 알고리즘을 만들지 않는다.
+- [ ] `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`을 구현한다.
+- [ ] MVP는 서버 저장형 세션을 사용한다. 임의 세션 토큰의 해시만 DB에 저장하고 HttpOnly 쿠키로 원본을 전달한다.
+- [ ] 배포는 프런트와 `/api`를 같은 origin으로 제공한다. 운영 쿠키는 Secure, SameSite=Lax로 설정하고 변경 요청은 CSRF 토큰과 Origin을 확인한다.
+- [ ] 로컬 프런트는 Vite proxy를 사용한다. 별도 origin 배포를 택하면 쿠키·CORS·CSRF 설정을 함께 재설계한다.
+- [ ] 데모 계정은 별도 생성 명령으로 만든다. 공개 기본 비밀번호나 자동 관리자 생성을 운영에 넣지 않는다.
+
+### 2-2. 권한표를 서버에서 적용
+
+| 작업 | MARKETER | REVIEWER | ADMIN |
+| --- | --- | --- | --- |
+| 고객·성과 조회 | 허용 | 허용 | 허용 |
+| 세그먼트·캠페인 편집 | 허용 | 읽기만 | 허용 |
+| 승인 요청 | 허용 | 불가 | 허용 |
+| 승인·반려 | 불가 | 허용 | 허용 |
+| 승인된 캠페인 모의 발송 | 허용 | 불가 | 허용 |
+| 데이터 적재·정책 설정 | 불가 | 불가 | 허용 |
+
+자기 승인 금지를 MVP 기본안으로 한다. 데모에서도 작성자와 승인자 계정을 분리한다. 로그인 제한과 세션 만료는 설정값으로 둔다.
+
+### 2-3. 감사 이벤트
+
+- [ ] `services/audit.py`에서 actor, resource_id, action, 이전/이후 version, request_id, 시각을 저장한다.
+- [ ] 생성·수정·삭제(보관)·승인·반려·발송 요청을 업무 변경과 같은 트랜잭션에 기록한다.
+- [ ] 이메일·비밀번호·세션 토큰은 감사 JSON과 애플리케이션 로그에서 제외한다.
+- [ ] `GET /audit-logs`는 ADMIN 조회, 캠페인 상세 이력은 해당 기능의 조회 권한으로 제한한다.
+
+**완료 기준:** 직접 HTTP 요청으로도 권한 우회가 안 된다. 로그아웃된 세션은 실패하고, 실패한 업무 트랜잭션의 변경 이력이 성공으로 남지 않는다.
+
+## 7. 단계 3 — 데이터 업로드와 샘플 데이터
+
+### 3-1. CSV 계약과 적재 순서
+
+적재 순서: 고객 → 상품 → 주문 및 주문 항목 → 행동 이벤트 → 캠페인 성과 이벤트.
+
+| 파일 | 필수 필드 예시 | 중복 기준 |
+| --- | --- | --- |
+| customers.csv | external_id, signup_at, status, email_consent | external_id |
+| products.csv | external_id, name, category | external_id |
+| orders.csv | external_id, customer_external_id, purchased_at, status, amount | external_id |
+| order_items.csv | order_external_id, line_id, product_external_id, quantity, amount | 주문+line_id |
+| events.csv | external_id, customer_external_id, event_type, event_at | external_id |
+| campaign_events.csv | external_id, delivery_id, event_type, event_at | external_id |
+
+연락처·이벤트별 properties는 별도 스키마로 검증한다. CSV 템플릿과 정상/오류 샘플을 `tests/fixtures/imports/`에 둔다.
+
+### 3-2. 미리보기 → 확정 적재
+
+- [ ] `POST /data/import/{kind}/preview`에서 파일을 검증하고 `import_batch_id`, 오류 행, 예상 생성·변경·중복 건수를 반환한다.
+- [ ] CSV는 UTF-8/UTF-8 BOM을 지원하고 기본 제한은 파일 20MB·20만 행으로 둔다. 초과는 업로드 시 차단한다.
+- [ ] 필수 컬럼, 타입, 존재하지 않는 FK, 음수 금액, 날짜 timezone을 확인한다. 행 번호는 헤더 포함 여부를 문서화한다.
+- [ ] MVP는 오류가 하나라도 있으면 확정 불가로 한다. 부분 성공 모드를 암묵적으로 만들지 않는다.
+- [ ] `POST /data/import/{batch_id}/commit`은 202와 job_id를 반환한다. 미리보기 이후 파일 내용을 바꾸어 제출할 수 없도록 파일 hash를 묶는다.
+- [ ] 임시 적재 후 하나의 병합 트랜잭션으로 반영하고 `dataset_versions`를 증가시킨다.
+- [ ] 같은 외부 ID·같은 내용은 no-op, 같은 ID·변경 내용은 명시적 upsert 모드에서만 갱신한다. 이벤트 내용 변경은 기본 차단한다.
+- [ ] 임시 파일은 임의 이름으로 저장하고 완료·실패 후 보관 기한에 따라 정리한다.
+
+### 3-3. 샘플 생성기
+
+- [ ] `scripts/seed_demo.py`에 `--seed`, `--reference-at`, `--size small|demo` 옵션을 둔다.
+- [ ] small은 고객 100명 수준의 빠른 테스트, demo는 원문의 고객 1만·주문 3만·행동 이벤트 20만 규모로 만든다.
+- [ ] VIP 휴면·장바구니 이탈·미동의·탈퇴·hard bounce·노출 초과 고객을 구분 가능한 고정 그룹으로 생성한다.
+- [ ] 모바일 이탈 시나리오는 device_type, landing_view, 구매 연결 데이터까지 생성한다. 데이터가 없으면 해당 원인 분석을 표시하지 않는다.
+- [ ] 원천 테이블에서 고객 집계값을 계산한다. 샘플 집계값을 별도로 임의 입력하지 않는다.
+- [ ] 재실행은 seed dataset 키로 중복을 방지한다. DB 전체 삭제를 기본 동작으로 사용하지 않는다.
+
+**완료 기준:** 같은 seed와 기준 시점이면 같은 지표가 나온다. 동일 파일 재업로드가 숫자를 늘리지 않는다. 오류 CSV는 업무 데이터에 반영되지 않는다.
+
+## 8. 단계 4 — 프런트엔드 공통 기반
+
+- [ ] `frontend/`에 원문 스택인 React·TypeScript·Vite를 구성하고 lockfile을 커밋한다.
+- [ ] UI는 Tailwind CSS와 shadcn/ui로 통일한다. Router, TanStack Query, React Hook Form, Zod, Recharts를 필요한 화면 단계에서 추가한다.
+- [ ] 공통 API client에서 쿠키·CSRF·request_id·오류 변환을 처리한다. OpenAPI 기반 타입을 생성하는 명령을 추가한다.
+- [ ] 좌측 메뉴, 중앙 콘텐츠, 상단 기간 필터, 우측 AI 패널의 레이아웃을 만든다.
+- [ ] 로그인·401 리다이렉트·403 화면과 역할별 메뉴를 구현한다.
+- [ ] 로딩, 빈 데이터, 오류, 재시도, 저장 중, 저장 실패 상태를 공통 컴포넌트로 만든다.
+- [ ] 기간·페이지·검색어는 URL과 동기화해 새로고침 후 복구한다.
+- [ ] 미완성 메뉴는 빈 성공 화면을 표시하지 않고 숨기거나 준비 중으로 표시한다.
+
+**산출물:** `frontend/src/app/`, `api/client.ts`, `features/auth/`, 레이아웃.
+
+**완료 기준:** 로그인 후 메뉴 이동·새로고침·만료 처리가 동작하고, 1280px 데스크톱에서 AI 패널을 열어도 본문 주요 버튼이 가려지지 않는다.
+
+## 9. 단계 5 — 고객과 대시보드
+
+### 5-1. 고객 조회 API와 화면
+
+- [ ] `GET /customers`에 검색·상태·가입 기간·페이지·허용 정렬을 구현한다.
+- [ ] 목록과 상세 API에서 이메일을 마스킹한다. LLM 전용 응답과 고객 조회 응답 모델을 분리한다.
+- [ ] `GET /customers/{id}`, `/events`, `/deliveries`, `/segments`를 구현한다.
+- [ ] 상세 화면에 구매 합계, 주문 수, 평균 주문 금액, 최근 구매, 채널 동의, 선호 카테고리, 타임라인을 연결한다.
+- [ ] RFM은 기준 시점의 최근 구매 경과일·완료 주문 수·완료 주문액으로 계산하고 점수 구간과 동점 처리 규칙을 저장한다. 최초에는 명시적 고정 구간을 사용한다.
+- [ ] 피로도 점수는 최근 1일/7일 발송 수와 제한 대비 비율로 표시한다. AI 추정치로 표시하지 않는다.
+
+### 5-2. 지표 쿼리
+
+| 지표 | MVP 계산 규칙 |
+| --- | --- |
+| 전체 고객 | `signup_at < to`인 고객, 탈퇴 포함 여부를 화면에 명시 |
+| 신규 고객 | `[from,to)`에 가입한 고객 |
+| 활성 고객 | 기간 내 VIEW/CART/PURCHASE 고객의 distinct 수 |
+| 휴면 고객 | `to` 시점 기준 상태 규칙상 DORMANT인 고객 |
+| 구매 전환율 | 기간 내 구매한 활성 고객 / 기간 내 활성 고객 |
+| 재구매율 | 기간 내 완료 주문이 2건 이상인 고객 / 기간 내 완료 주문 고객 |
+| CRM 기여 매출 | 10단계 기여 규칙으로 귀속된 주문액 합계 |
+
+- [ ] `GET /dashboard/overview`, `/funnel`, `/segments`에 동일 기간과 data_version을 사용한다.
+- [ ] 이전 기간은 바로 앞의 동일 길이 구간으로 정한다. 비율 차이는 `%p`, 상대 변화는 `%`로 구분한다.
+- [ ] 분모가 0이면 값은 `null`, 사유는 `NO_DENOMINATOR`로 반환한다.
+- [ ] 퍼널은 기간 내 VIEW→CART→PURCHASE를 시간 순서대로 만족한 distinct 고객으로 계산한다. 단계별 전체 이벤트 수를 퍼널 인원으로 쓰지 않는다.
+- [ ] 기여 매출은 10단계 전까지 `not_ready`로 표시한다. 미구현을 매출 0으로 표현하지 않는다.
+
+### 5-3. 프런트 연결
+
+- [ ] `features/customers/`, `features/dashboard/`에 테이블·상세·KPI 카드·분포·퍼널을 작성한다.
+- [ ] 집계 기준과 이전 기간을 툴팁으로 표시하고 차트 클릭 시 해당 고객 필터로 이동한다.
+- [ ] 세그먼트 분포는 중복 가입 가능하므로 합이 전체 고객 수와 같다는 표현을 쓰지 않는다.
+
+**완료 기준:** 손으로 계산한 고정 fixture와 KPI가 일치한다. 쿼리 수를 기록해 고객 수에 비례하는 N+1을 제거한다. demo 규모의 목록·집계 응답 시간을 측정해 기록한다.
+
+## 10. 단계 6 — 세그먼트 DSL과 조건 빌더
+
+### 6-1. 필드 레지스트리
+
+- [ ] `domain/segments/fields.py`에 필드명, 타입, 허용 연산자, SQLAlchemy 표현식 생성 함수를 등록한다.
+- [ ] 최초 필드는 구매 경과일, 구매 합계, 주문 수, 상태, 이메일 동의, 최근 30일 이메일 오픈 수, 선호 카테고리로 제한한다.
+- [ ] 원문의 `marketing_consent`는 이메일 동의의 호환 별칭으로 정의하고, 화면에서는 채널을 명시한다.
+- [ ] 나이대 프로파일은 선택적 비민감 집계 속성으로만 사용하고, 자료가 없으면 미집계로 표시한다. 민감정보·연락처 필드는 DSL 목록에 넣지 않는다.
+
+### 6-2. 검증기와 SQL 컴파일러
+
+- [ ] `dsl.py`에 AND/OR 그룹과 조건 노드의 Pydantic 모델을 작성한다.
+- [ ] 최대 깊이 3, 조건 20개, IN 항목 100개를 MVP 제한으로 둔다.
+- [ ] 연산자별 값 형태를 검사한다. BETWEEN은 정확히 두 값과 오름차순, IS_NULL은 값 없음으로 정한다.
+- [ ] 숫자 필드에 boolean, 날짜 필드에 임의 문자열, 알 수 없는 필드는 거절한다.
+- [ ] `compiler.py`는 등록된 표현식과 바인딩 값으로만 SQLAlchemy 조건을 만든다. 사용자 문자열을 SQL 식별자나 raw SQL로 사용하지 않는다.
+- [ ] 이벤트 조건은 EXISTS/집계 서브쿼리로 작성해 한 고객이 여러 번 집계되지 않게 한다.
+- [ ] `human_readable.py`가 검증된 DSL에서 설명을 생성한다. LLM이 설명과 조건을 각각 임의 생성하게 하지 않는다.
+
+### 6-3. 미리보기와 저장
+
+```json
+{
+  "condition": {
+    "operator": "AND",
+    "conditions": [
+      {"field": "days_since_last_purchase", "comparison": "GTE", "value": 60},
+      {"field": "total_purchase_amount", "comparison": "GTE", "value": "300000"},
+      {"field": "email_consent", "comparison": "EQ", "value": true}
+    ]
+  },
+  "reference_at": "2026-09-14T00:00:00+09:00"
+}
+```
+
+- [ ] `POST /segments/preview`는 count, 고객 비중, 프로파일, 설명, 경고, reference_at, data_version, condition_hash를 반환한다.
+- [ ] 프로파일은 평균 구매액·선호 카테고리·최근 반응률을 SQL로 계산한다. 최소 집계 집단 미만의 세부 항목은 AI 전달 시 생략한다.
+- [ ] 0명은 저장 가능 경고, 전체의 80% 초과도 경고로 처리한다. 발송 적격 검수와 세그먼트 조건 집계를 구분한다.
+- [ ] `POST /segments`, `PUT /segments/{id}`에서 같은 검증기를 다시 실행하고 revision을 남긴다.
+- [ ] 수정 요청은 version을 받는다. 다른 사용자가 먼저 변경했으면 409로 처리한다.
+- [ ] `DELETE /segments/{id}`는 보관 처리한다. 기존 캠페인이 참조하는 revision은 유지한다.
+- [ ] 프런트 조건 빌더·템플릿·자연어 탭이 모두 같은 DSL을 사용하게 한다. 자연어 탭은 11단계에서 연결한다.
+
+**완료 기준:** DSL·표시 설명·실제 고객 집합이 일치한다. 금액 경계, null, AND/OR, 중복 이벤트, 잘못된 필드, 과도한 중첩 테스트를 통과한다.
+
+## 11. 단계 7 — 캠페인 초안과 카피 에디터
+
+### 7-1. 캠페인 생성
+
+- [ ] 005 마이그레이션과 `schemas/campaign.py`, `services/campaigns.py`, `routes/campaigns.py`를 추가한다.
+- [ ] `POST/GET /campaigns`, `GET/PUT /campaigns/{id}`를 구현한다.
+- [ ] 이름, 목표, 세그먼트 revision, 제외 세그먼트 revision, 채널, 혜택, 브랜드 톤, KPI와 목표값을 저장한다.
+- [ ] 날짜는 MVP에서 예정 정보로만 저장하며 예약 실행을 제공하지 않는다.
+- [ ] 한 캠페인은 한 채널을 가진다. 다채널 운영은 캠페인을 복제해 각각 검수한다.
+
+### 7-2. A/B 편집
+
+- [ ] A/B 제목·본문·가설·배분 비율을 저장한다. EMAIL/PUSH는 제목과 본문, SMS는 본문을 사용한다.
+- [ ] 비율은 정수 basis point로 저장해 합계 10,000을 검증한다. UI에는 50:50 등 백분율로 표시한다.
+- [ ] 채널별 길이 제한·금지 표현·필수 문구는 버전 있는 데모 정책 설정으로 관리한다. 실제 발송사·법규 준수를 검증한 정책으로 주장하지 않는다.
+- [ ] 미지원 개인화 변수는 거절한다. 이메일 HTML을 지원할 경우 저장·미리보기에서 허용 태그만 처리한다.
+- [ ] 사용자가 수정하면 campaign version을 증가시키고 감사 기록을 남긴다.
+- [ ] `features/campaigns/`에 목표→대상→채널→카피→실험→검수 단계를 구현한다. 단계 이동 전에 서버 저장 결과를 확인한다.
+
+**완료 기준:** AI 없이 A/B 캠페인을 저장·재조회·편집할 수 있다. 비율 오류, 빈 필수 카피, 다른 사용자의 변경 충돌을 화면에서 처리한다.
+
+## 12. 단계 8 — 정책 검수와 승인
+
+### 8-1. 규칙 엔진
+
+각 규칙은 `rule_code`, `severity`, `passed`, `affected_count`, `message`를 반환한다. 고객별 제외와 캠페인 전체 차단을 구분한다.
+
+| 적용 순서 | 고객 제외 규칙 | 주요 데이터 |
+| --- | --- | --- |
+| 1 | 탈퇴 | customers.status |
+| 2 | 채널 수신 미동의 | customer_channels.consent |
+| 3 | 연락처 없음·무효·hard bounce | 채널 연락처 상태 |
+| 4 | 명시적 제외 세그먼트 | 제외 revision의 고객 집합 |
+| 5 | 같은 캠페인 기수신 | campaign_deliveries |
+| 6 | 일일·주간 노출 초과 | 채널별 최근 발송·예약된 대상 |
+
+MVP 노출 한도 기본안은 채널별 1일 1회·최근 7일 3회다. 1일은 업무 시간대의 당일 구간, 7일은 실행 시각 기준 이동 구간으로 명시한다. 정책값은 Settings에서 ADMIN이 변경하고 version을 증가시킨다.
+
+- [ ] `domain/policies/`의 순수 규칙과 대상 조회를 분리한다.
+- [ ] 고객이 여러 규칙에 걸리면 모든 사유를 보관하되 집계표의 primary_reason은 최초 사유 하나만 사용한다.
+- [ ] `최초 인원 = primary_reason별 제외 합계 + 최종 인원`을 보장한다.
+- [ ] 쿠폰 만료, 필수 문구 누락, 금지 표현, 잘못된 실험 비율, 최종 0명은 캠페인 전체 차단으로 처리한다.
+- [ ] `POST /campaigns/{id}/validate`에서 검수 기록과 후보 고객 스냅샷을 저장한다. 이 엔드포인트는 검수 기록을 쓰지만 캠페인 내용을 변경하지 않는다.
+
+### 8-2. 승인 대상 고정
+
+- [ ] `validation_runs`에 campaign/segment/policy/data version, reference_at, content_hash, count, 만료 시각을 둔다.
+- [ ] MVP 검수 유효시간은 30분으로 한다. 정책 변경·캠페인 변경 시 즉시 무효다.
+- [ ] `POST /request-approval`은 현재 version의 유효한 검수가 있을 때만 REVIEW로 전환한다.
+- [ ] `POST /approve`, `POST /reject`는 승인 요청 ID와 version을 확인하고 결정자를 서버 세션에서 얻는다.
+- [ ] 승인 후 카피·혜택·타깃을 변경하려면 먼저 DRAFT로 되돌리고 기존 승인을 무효화한다.
+- [ ] 세그먼트 원본이 수정되어도 캠페인은 저장된 revision을 유지한다. 새 revision 적용은 명시적 편집이다.
+
+### 8-3. 상태 전환표
+
+| 현재 | 작업 | 다음 | 필수 조건 |
+| --- | --- | --- | --- |
+| DRAFT | 검수 | DRAFT | 검수 결과만 저장 |
+| DRAFT | 승인 요청 | REVIEW | 최신 검수 통과·대상 1명 이상 |
+| REVIEW | 승인 | APPROVED | reviewer 권한·자기 승인 아님·version 일치 |
+| REVIEW | 반려/요청 철회 | DRAFT | 사유 또는 요청자 확인 |
+| APPROVED | 편집 재개 | DRAFT | 기존 승인 무효화 |
+| APPROVED | 모의 발송 요청 | RUNNING | 유효 승인·실행 직전 검수·멱등 키 |
+| RUNNING | 작업 완료 | COMPLETED | 모든 대상 결과 확정 |
+| DRAFT/REVIEW/APPROVED | 취소 | CANCELLED | 실행 시작 전 |
+
+RUNNING 중 오류는 캠페인 상태를 임의로 DRAFT로 되돌리지 않고 run/job을 FAILED로 기록한다. 동일 실행을 재개하거나 관리자 복구 절차를 따른다. RUNNING 취소·PAUSED·SCHEDULED는 MVP API에서 거절한다.
+
+**완료 기준:** 승인 전 발송 409, MARKETER 승인 403, 오래된 검수 승인 409, 승인 후 수정 시 재승인이 필요하다. 동시 승인 요청 중 하나만 성공한다.
+
+## 13. 단계 9 — 모의 발송과 성과 이벤트
+
+### 9-1. 실행 요청을 원자적으로 처리
+
+- [ ] `POST /campaigns/{id}/simulate-send`에 `Idempotency-Key`를 필수로 받는다.
+- [ ] 캠페인 행 잠금 → 상태/승인 검사 → run 생성 → 대상 예약 → job 생성 → RUNNING 전환을 한 트랜잭션으로 처리한다.
+- [ ] 같은 키·같은 payload면 기존 run을 반환하고, 같은 키·다른 payload면 409를 반환한다.
+- [ ] 다른 키로 다시 호출해도 RUNNING/COMPLETED 캠페인은 새 실행을 만들 수 없게 한다. 새 실험은 캠페인 복제로 생성한다.
+- [ ] 서로 다른 캠페인의 동시 실행도 피로도 한도를 넘지 않도록 고객 잠금을 일정 순서로 잡고 기존 예약분까지 한도에 포함한다.
+
+### 9-2. 실행 직전 재검수와 A/B 배정
+
+- [ ] 승인 스냅샷을 후보 상한으로 사용한다. 새로 자격을 얻은 고객을 실행 시 임의로 추가하지 않는다.
+- [ ] 현재 탈퇴·동의·연락처·노출 상태를 다시 검사한다. 변경으로 제외되는 고객과 사유를 실행 결과에 기록한다.
+- [ ] 내용/정책 변경 또는 승인 만료는 재승인을 요구한다. 안전상 제외 인원이 생겼다는 이유만으로 새 고객을 보충하지 않는다.
+- [ ] 적격 고객을 campaign seed와 고객 ID의 안정적 hash로 정렬하고 비율만큼 A/B로 나눈다. 홀수 나머지 배정 규칙을 고정한다.
+- [ ] A/B 배정을 DB에 저장하고 재시도 시 재추첨하지 않는다.
+
+### 9-3. 시뮬레이션 처리
+
+- [ ] 외부 발송 API 대신 `Simulator`가 SENT/FAILED/EXCLUDED를 만든다.
+- [ ] 전달 성공 이후에만 OPEN/CLICK/CONVERSION 이벤트를 만든다. 이벤트 시간 순서와 채널별 가능 이벤트를 지킨다.
+- [ ] 난수 seed와 반응 확률을 run에 저장한다. 같은 run의 재시도는 동일 결과를 만들고 unique 키로 중복 삽입을 막는다.
+- [ ] 모의 주문과 이벤트는 `source=SIMULATED`, dataset_id로 구분한다. 실제 업로드 데이터의 성과와 기본 집계에서 섞지 않는다.
+- [ ] 별도 `GET /campaigns/{id}/runs/{run_id}`와 job 조회로 진행률·성공·실패·제외 수를 보여준다.
+- [ ] 실패 재시도는 동일 run의 미처리 고객부터 진행한다. 외부 실제 발송과 동일한 exactly-once 보장을 주장하지 않는다.
+
+**완료 기준:** 더블클릭·HTTP 재전송·worker 중단 후 재개에도 고객당 결과 1건이다. A/B 교집합은 0명이고 실행 시점 미동의 고객은 SENT가 되지 않는다.
+
+## 14. 단계 10 — 성과 집계·실험·보고서
+
+### 10-1. 이벤트 정규화와 매출 귀속
+
+- [ ] `campaign_events`는 delivery_id·variant_id와 연결하고 외부 이벤트 ID로 deduplicate한다.
+- [ ] 동일 고객의 여러 OPEN/CLICK은 이벤트 타임라인에는 남기되 비율에서는 distinct 고객 1명으로 센다.
+- [ ] 기여 모델 기본안: 주문 전 7일 이내 마지막 유효 캠페인 클릭에 주문을 한 번만 귀속한다. 클릭이 없으면 CRM 기여 매출로 계산하지 않는다.
+- [ ] 동일 시각 클릭의 tie-break는 이벤트 ID로 고정한다. 주문 취소·전액 환불 시 기여를 재계산한다.
+- [ ] 시뮬레이션 주문도 같은 귀속 함수를 통과한다. 매출을 AI가 생성하거나 별도 숫자로 덮어쓰지 않는다.
+- [ ] 관찰 기간, 귀속 모델 버전, 집계 시각을 응답에 포함한다.
+
+### 10-2. 성과 API
+
+- [ ] `GET /campaigns/{id}/performance`에서 발송·전달·오픈·클릭·전환·매출과 A/B별 분모를 반환한다.
+- [ ] 오픈율/클릭률/전환율은 해당 이벤트 고객 수 ÷ 전달 성공 고객 수다. CTOR은 클릭 고객 ÷ 오픈 고객이다.
+- [ ] 푸시/SMS에서 지원하지 않는 OPEN은 0% 대신 `not_applicable`로 반환한다.
+- [ ] 기간 필터는 발송 cohort 기간과 전환 관찰 기간을 분리한다. 서로 다른 cohort의 분모와 분자를 섞지 않는다.
+- [ ] 수신 거부 이벤트도 추가해 가드레일 지표를 계산한다.
+
+### 10-3. A/B 결과 판단
+
+- [ ] 배정 시 실험 seed, 비율, primary KPI, 관찰 종료 시각, 최소 표본 기준을 고정한다.
+- [ ] A/B 표본 수, 전환 수, 절대 차이 `%p`, 상대 개선율을 표시한다. 기준군 전환 0이면 상대 개선율은 null이다.
+- [ ] 비율 신뢰구간은 검증된 통계 라이브러리로 계산한다. 적용 방법과 가정을 `metric_definitions.md`에 기록하고 공식 자료를 구현 시 확인한다.
+- [ ] 관찰 미종료·최소 표본 미달·가드레일 악화면 판단 보류한다. 최소 표본은 목표 효과와 검정력 가정으로 산출하며 임의 고정 숫자를 유의성 보장으로 쓰지 않는다.
+- [ ] 통제군이 없는 MVP에서는 증분 전환율·증분 매출을 `not_available`로 표시한다. A/B 차이를 무발송 대비 증분으로 부르지 않는다.
+
+### 10-4. 보고서와 화면
+
+- [ ] `features/reports/`, 캠페인 상세, Experiments 화면을 공통 성과 API로 연결한다.
+- [ ] `GET /reports/summary`, `/reports/campaigns`, `/reports/export`에서 주간·세그먼트·채널·기간 비교를 제공한다.
+- [ ] CSV에는 기간·기준 시점·모의 데이터 여부를 포함하고 셀 수식으로 실행될 수 있는 사용자 문자열을 안전하게 처리한다.
+- [ ] 차트의 0/미집계/해당 없음 상태를 구분한다. AI 요약 영역은 11단계에서 연결한다.
+
+**완료 기준:** 작은 fixture의 모든 지표가 수계산과 일치한다. 이벤트 중복, 0 분모, 취소 주문, 기여 경계 7일, 동일 주문 다중 클릭, 관찰 미종료 테스트를 통과한다.
+
+## 15. 단계 11 — AI 기능을 개별 서비스로 연결
+
+### 11-1. AI provider와 출력 계약
+
+- [ ] `ai/provider.py`에 조건 생성·카피 생성·성과 분석 인터페이스를 만들고 mock provider부터 작성한다.
+- [ ] `OPENAI_API_KEY`, `AI_MODEL`, `AI_MODE=mock|live`, timeout, 최대 출력량을 서버 설정으로 둔다. 모델 이름은 배포 시 사용 가능성과 기능 지원을 확인해 고정한다.
+- [ ] `ai/schemas.py`에 SegmentConditionResult, CampaignDraftResult, CopyVariantsResult, PerformanceAnalysisResult를 정의한다.
+- [ ] 구조화 출력으로 스키마를 제한하되, 필드 허용 여부·금액·업무 상태는 서버에서 다시 검증한다. 거절·출력 중단·파싱 실패는 정상 결과와 구분한다. 구현 참고: [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+- [ ] timeout·429·일시적 서버 오류에 제한된 재시도를 적용한다. 스키마 재생성은 1회로 제한하고 최종 실패 시 수동 입력을 제공한다.
+- [ ] AI 호출 전후 DB 트랜잭션을 짧게 분리한다. 응답이 돌아오면 입력 resource version이 여전히 같은지 확인한다.
+
+### 11-2. 자연어 세그먼트
+
+- [ ] `POST /ai/segment-condition`에 prompt와 reference_at을 받는다.
+- [ ] 필드 목록·연산자·타입·기준 시점만 모델에 제공한다. 고객 행을 보내지 않는다.
+- [ ] 응답 DSL을 6단계 검증기와 컴파일러에 통과시킨다.
+- [ ] 금액·기간·채널이 모호하면 `needs_clarification`과 질문을 반환한다. 조건을 임의로 넓혀 저장하지 않는다.
+- [ ] 설명·고객 수는 서버 DSL 설명기와 집계에서 생성하고, 사용자가 확인한 후 일반 `/segments` API로 저장한다.
+
+### 11-3. 캠페인 초안과 카피
+
+- [ ] `POST /ai/campaign-draft`, `/ai/copy-variants`에 집계 프로파일, 사용자가 정한 목표·혜택, 채널·브랜드 정책을 제공한다.
+- [ ] A/B 제목·본문·가설·생성 근거를 반환한다. 할인율·쿠폰 만료·실제 혜택은 입력에 없는 값을 지어내지 못하게 검증한다.
+- [ ] AI 결과는 편집 가능한 제안으로 표시한다. 사용자가 적용하면 일반 캠페인 저장 서비스가 version과 감사를 처리한다.
+- [ ] 브랜드 가이드는 MVP에서 ADMIN이 관리하는 짧은 설정 문서로 공급한다. RAG가 없어도 카피 생성이 가능해야 한다.
+
+### 11-4. 성과 분석
+
+- [ ] `POST /ai/performance-analysis`에 캠페인 ID와 기간을 받고 서버가 10단계 집계를 조회한다.
+- [ ] 출력은 `facts`, `hypotheses`, `limitations`, `recommended_actions`, `metric_refs`로 나눈다.
+- [ ] 사실에 포함된 숫자는 제공한 metric ID와 대조한다. 근거 없는 수치나 없는 device 데이터를 이용한 설명은 거절한다.
+- [ ] 원인 설명은 관찰상 가설로 표시한다. 상관관계를 인과 효과로 확정하지 않는다.
+- [ ] 다음 액션은 허용된 enum과 대상 ID로 반환하고 자동 실행하지 않는다.
+
+### 11-5. AI 로그와 평가 데이터
+
+- [ ] 사용자·작업·모델·prompt version·입출력 요약·시간·토큰 사용량·성공/실패를 기록한다.
+- [ ] 자유 입력에 개인정보가 포함될 수 있으므로 모델 전달 전 제거·차단하고 로그에도 원문을 무조건 저장하지 않는다.
+- [ ] 한국어 조건 해석 평가셋을 만든다: 기간 경계, 30만 원, 미구매, OR, 부정 조건, 모호한 VIP, 금지 필드 등.
+- [ ] CI는 고정 mock 응답으로 실행한다. live 검증은 별도 명령으로 실제 API 성공·거절·timeout을 확인한다.
+
+**완료 기준:** AI가 실패해도 수동 업무 흐름은 사용 가능하다. 잘못된 조건·숫자·도구 인자는 DB 변경으로 이어지지 않는다. mock 결과는 화면에 모의 응답임을 표시한다.
+
+## 16. 단계 12 — 실행형 AI 패널과 사용자 확인
+
+### 12-1. 도구 레지스트리
+
+- [ ] `ai/tools.py`에 get_metric, preview_segment, create_segment_draft, create_campaign_draft, generate_copy, validate_campaign, analyze_campaign을 등록한다.
+- [ ] 도구 호출 인자를 스키마 검증하고 인증 사용자·권한·허용 리소스를 서버에서 주입한다.
+- [ ] 모델은 도구 호출을 제안하고 서버가 함수를 실행한다. 호출 이름을 임의의 함수명·SQL·URL로 해석하지 않는다. 구현 참고: [OpenAI Function Calling](https://developers.openai.com/api/docs/guides/function-calling).
+- [ ] 도구 호출 횟수·전체 실행 시간·출력 크기를 제한하고 무한 반복 시 종료한다.
+- [ ] validate_campaign은 검수 기록을 남기는 제한적 쓰기로 취급한다. 승인·발송 권한을 이 도구에 포함하지 않는다.
+
+### 12-2. 확인 가능한 액션 제안
+
+- [ ] 저장·승인 요청은 `ai_action_proposals`에 정규화된 payload, hash, 사용자, resource version, 만료 시각을 저장한다.
+- [ ] 패널에 조건·카피·변경 내용을 보여주고 사용자가 적용 버튼을 누르게 한다.
+- [ ] `POST /ai/actions/{proposal_id}/confirm`에서 사용자·만료·버전·이미 실행 여부를 검사한 후 일반 업무 서비스를 호출한다.
+- [ ] 수정된 payload는 기존 확인을 재사용하지 않고 새 제안을 만든다.
+- [ ] 승인 결정과 모의 발송은 각각 승인 화면·캠페인 실행 버튼으로 수행한다. AI 도구 목록에 무인 승인·발송을 노출하지 않는다.
+- [ ] 프런트가 `confirmed=true`만 보내면 실행되는 방식은 사용하지 않는다.
+
+### 12-3. 패널 UI
+
+- [ ] `POST /ai/chat` 응답을 message, result_type, data, actions, reference_at, request_id로 통일한다.
+- [ ] 세그먼트 미리보기·카피 비교·검수 결과·성과 분석 카드 renderer를 분리한다.
+- [ ] 저장 성공 시 해당 Query cache를 갱신하고 상세 화면으로 이동할 수 있게 한다.
+- [ ] 실패 후 재시도와 확인 버튼 중복 클릭을 처리한다. 확인된 제안은 다시 실행하지 않는다.
+- [ ] 현재 화면 ID·기간·선택 세그먼트만 문맥으로 전달한다. 화면의 전체 고객 테이블을 프롬프트에 넣지 않는다.
+- [ ] 대화 전문의 장기 저장은 확장 기능으로 두되 모든 AI 실행·확인 액션 로그는 MVP에서 보존한다.
+
+**완료 기준:** 자연어 요청 → 조건 카드 → 확인 → 저장 → 화면 반영이 가능하다. 새로고침·더블클릭·오래된 카드 확인이 중복 변경을 만들지 않는다.
+
+## 17. 단계 13 — 통합 검증·배포·포트폴리오
+
+### 13-1. 테스트 계층
+
+| 계층 | 위치 | 필수 검증 |
+| --- | --- | --- |
+| 단위 | `tests/unit/` | DSL, 상태 전환, 제외 우선순위, 배정, 지표 계산 |
+| DB 통합 | `tests/integration/` | 실제 PostgreSQL의 FK·JSONB·잠금·트랜잭션·멱등성 |
+| API | `tests/integration/` | 로그인·권한·업로드·업무 HTTP 흐름 |
+| 프런트 | `frontend/src/**/*.test.*` | 조건 편집, 검수 사유, 오류·미집계 표시 |
+| E2E | `frontend/e2e/` | 두 역할로 승인하고 모의 발송 후 성과 확인 |
+| AI 평가 | `tests/fixtures/ai/` 및 별도 실행기 | 조건 의미 일치, 잘못된 출력 차단, live 연결 |
+
+SQLite로 통과한 테스트를 PostgreSQL 잠금·JSONB 검증의 대체로 삼지 않는다. CI는 전용 DB를 사용하고 실제 운영 DB 주소로 테스트를 실행하지 못하도록 검사한다.
+
+### 13-2. CI와 배포
+
+- [ ] GitHub Actions에서 의존성 설치, lint/typecheck, pytest, 프런트 테스트/build, OpenAPI 타입 갱신 누락을 검사한다.
+- [ ] Docker 이미지에 API와 worker 실행 경로를 제공한다. migration은 별도 일회 작업으로 수행한다.
+- [ ] 프런트·API는 같은 origin 경로로 노출하고 DB는 외부 공개하지 않는 배포 구성을 작성한다.
+- [ ] 배포 업체 선택은 실제 계정·예산·서비스 제한 확인 후 한다. 아직 선택되지 않은 업체에 종속되는 코드를 만들지 않는다.
+- [ ] 운영 설정에 DB/세션 비밀값·AI 키를 환경변수로 주입하고 공개 데모에서는 합성 고객만 사용한다.
+- [ ] readiness, worker heartbeat, 실패 job 수, AI 실패율·응답 시간 로그를 확인한다.
+- [ ] DB 백업 복원과 직전 앱 이미지 재배포 절차를 `docs/deployment_runbook.md`에 작성하고 한 번 실행한다.
+
+### 13-3. 대표 시연
+
+1. MARKETER로 로그인해 재구매율 하락과 집계 기간을 확인한다.
+2. 휴면 VIP 조건을 AI에 요청하고 DSL·기준 시점·대상 수를 확인한다.
+3. 세그먼트를 저장한 뒤 이메일 캠페인을 생성한다.
+4. A/B 카피를 생성하고 혜택 또는 표현을 직접 수정한다.
+5. 검수에서 미동의·중복·오류 연락처가 제외되는 것을 확인한다.
+6. REVIEWER로 로그인해 동일 campaign version을 승인한다.
+7. MARKETER가 모의 발송하고 진행률·결과를 확인한다.
+8. A/B 결과·모의 데이터 표기·판단 한계를 확인한다.
+9. AI 분석에서 근거 지표와 다음 실험 제안을 확인하고 새 초안을 만든다.
+10. 푸시·SMS도 채널 동의와 카피 제한이 적용되는 짧은 보조 시연을 수행한다.
+
+**완료 기준:** 빈 환경에서 README대로 설치한 뒤 시연 전 과정이 완료된다. 업무 시간 단축 수치는 실제 사용자 과업 측정치와 목표 가설을 분리해 기록한다.
+
+## 18. 개발 티켓·커밋 묶음
+
+아래 묶음은 한 번에 검토 가능한 변경 단위다. 각 묶음에는 해당 단계의 테스트와 실행 안내를 포함한다. 공수는 1인 개발의 작업 분해용 추정이며 확정 일정이 아니다. UI 완성도·DB 경험·피드백에 따라 달라진다.
+
+| 순서 | 티켓 범위 | 예상 작업일 | 한글 Conventional Commit 예시 |
+| --- | --- | --- | --- |
+| 01 | API·지표 계약 | 1~2 | `docs: API 계약과 CRM 지표 기준 정의` |
+| 02 | DB·초기 migration | 2~3 | `feat(db): PostgreSQL 연결과 초기 스키마 추가` |
+| 03 | 작업 worker | 2~3 | `feat(jobs): 작업 실행과 재시도 기반 구현` |
+| 04 | 로그인·권한·감사 | 2~4 | `feat(auth): 역할 기반 로그인과 감사 이력 구현` |
+| 05 | 데이터 적재 | 3~5 | `feat(data): CSV 검증과 중복 없는 적재 구현` |
+| 06 | 샘플 생성 | 1~2 | `feat(data): 재현 가능한 CRM 데모 데이터 생성` |
+| 07 | 프런트 기반 | 2~3 | `feat(web): 로그인과 대시보드 공통 레이아웃 추가` |
+| 08 | 고객·KPI | 3~5 | `feat(analytics): 고객 조회와 CRM 지표 대시보드 구현` |
+| 09 | DSL·미리보기 | 3~5 | `feat(segments): 조건 검증과 대상자 미리보기 구현` |
+| 10 | 세그먼트 화면 | 2~3 | `feat(segments): 조건 빌더와 세그먼트 저장 화면 추가` |
+| 11 | 캠페인·A/B 편집 | 3~5 | `feat(campaigns): 캠페인 초안과 채널별 카피 편집 구현` |
+| 12 | 정책·승인 | 3~5 | `feat(policies): 정책 검수와 버전 기반 승인 구현` |
+| 13 | 모의 발송 | 3~5 | `feat(campaigns): 중복 방지와 모의 발송 작업 구현` |
+| 14 | 성과·보고서 | 3~5 | `feat(reports): 캠페인 성과와 A/B 비교 구현` |
+| 15 | AI 개별 생성 | 3~5 | `feat(ai): 세그먼트와 카피 구조화 생성 구현` |
+| 16 | AI 분석·패널 | 3~5 | `feat(ai): 성과 분석과 확인 기반 업무 실행 연결` |
+| 17 | E2E·배포·시연 | 3~5 | `test: 캠페인 운영 전체 시나리오 검증` |
+
+합계는 약 42~70 작업일이며 피드백·재작업 여유는 별도다. 빠른 1차 시연은 01~14의 핵심 이메일 흐름으로 만들고, 최종 MVP 판정은 모든 필수 기능과 19절 기준으로 한다.
+
+## 19. 요구사항 추적과 최종 체크리스트
+
+| 원문 요구사항 | 상세 단계 | 합격 증거 |
+| --- | --- | --- |
+| 고객·이벤트 업로드 | 3 | 정상·오류·재업로드 통합 테스트 |
+| CRM 대시보드·고객 상세 | 5 | fixture 기대 지표와 화면 비교 |
+| 조건 기반·자연어 세그먼트 | 6, 11 | 동일 DSL의 고객 집합 일치 |
+| 세그먼트 프로파일 | 6, 11 | 집계 근거와 기준 시점 표시 |
+| 캠페인 초안·3채널 A/B 카피 | 7, 11 | 저장·수정·채널별 검수 |
+| 동의·중복·피로도 정책 | 8, 9 | 제외 합계와 동시 실행 테스트 |
+| 담당자 승인·모의 발송 | 8, 9 | 미승인 차단과 재시도 멱등성 |
+| 성과 대시보드·실험 비교 | 10 | 분모·매출 귀속·판단 보류 테스트 |
+| AI 요약·후속 추천 | 11, 12 | 근거 ID와 확인 후 새 초안 |
+| AI 실행·사용자 변경 기록 | 2, 11, 12 | actor/version/request_id 연결 |
+| Reports·CSV | 10 | 화면 수치와 내보내기 일치 |
+| Data & Integrations·Settings | 3, 8 | 적재 상태와 버전 있는 정책 설정 |
+
+- [ ] 승인되지 않은 캠페인은 어떤 API 경로에서도 실행되지 않는다.
+- [ ] 실행 시점에 미동의·탈퇴 고객은 발송 결과에 포함되지 않는다.
+- [ ] A/B 고객 교집합은 0명이고 재시도해도 배정이 같다.
+- [ ] 승인된 내용과 실행 내용의 version/hash가 일치한다.
+- [ ] AI가 만든 조건·설명·실제 SQL 집계가 일치한다.
+- [ ] 고객 개별 개인정보가 AI provider 요청과 로그에 노출되지 않는다.
+- [ ] 지표 계산·기간 경계·0 분모·중복 이벤트 테스트를 통과한다.
+- [ ] AI 장애 시 수동 생성·검수·승인·모의 발송이 가능하다.
+- [ ] 재시작 후 작업이 복구되고 데이터가 중복되지 않는다.
+- [ ] 모의 데이터와 실측 성과를 모든 보고서에서 구분한다.
+- [ ] 문서의 설치 명령으로 새 환경에서 같은 시연을 재현한다.
+
+## 20. MVP 이후 확장 진입 조건
+
+| 확장 | 착수 조건 | 추가 구현 |
+| --- | --- | --- |
+| 예약·일시 중지 | 모의 발송 복구와 멱등성 검증 완료 | 예약 시각·취소·재개·시간대와 상태 전환 |
+| 무발송 통제군 | 무작위 배정·전환 관찰 정의 고정 | 통제군 주문 관찰, ITT 분모, 증분 추정 |
+| 브랜드 문서 RAG | 가이드 수가 늘어 단순 설정으로 관리 곤란 | 문서 적재·버전·검색·출처·검색 품질 평가 |
+| MCP 분리 | 여러 AI 클라이언트가 같은 업무 도구 사용 | 인증된 도구 서버·권한·호환성 테스트 |
+| 실제 발송 | 모의 전체 흐름 검증 및 채널 요구사항 확정 | provider adapter·webhook·수신 거부·실제 정책 검토 |
+| 다단계 여정·알림 | 단일 캠페인 운영이 안정적 | 트리거·대기·분기·중단·중복 처리 |
+
+다음 실제 개발 착수점은 **0-1 API 계약 → 0-2 지표 정의 → 1-1 DB 연결 → 1-2 초기 모델**이다. 프런트 임시 지표나 AI 프롬프트보다 먼저 데이터 원천과 계산 규칙을 고정한다.
