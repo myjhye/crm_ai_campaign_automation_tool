@@ -71,11 +71,11 @@ docs/                     # 요구사항과 상세 계획
 ```
 
 새 API는 `app/api/routes/`에 추가하고 `app/api/router.py`에 등록합니다.
-현재는 서버 기반만 포함하며 DB, 인증, 캠페인 업무 기능은 아직 구현하지 않았습니다.
+현재는 공개 데모의 서버 기반과 단계 0 공통 규칙을 포함하며 DB와 캠페인 업무 기능은 아직 구현하지 않았습니다.
 상태 확인 API는 외부 서비스나 DB 연결 상태를 검사하지 않습니다.
 
-현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 1~3절입니다.
-새 패키지는 책임을 명시한 뼈대이며 DB 연결, 인증, AI 호출, worker 실행 기능은 아직 없습니다.
+현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 1~3절과 단계 0입니다.
+DB 연결, AI 호출, worker 실행 기능은 아직 없습니다.
 빈 디렉터리는 `.gitkeep`으로 버전 관리합니다. 프런트엔드 도구 설치는 단계 4에서 진행합니다.
 `compose.yaml`, `Dockerfile`, CI YAML은 해당 구현 단계에서 실행 가능한 설정과 함께 추가합니다.
 
@@ -83,6 +83,17 @@ docs/                     # 요구사항과 상세 계획
 서비스가 트랜잭션을 소유하고 repository는 임의로 commit하지 않습니다.
 일반 화면과 AI 도구는 같은 서비스를 사용하며, API 요청·응답 모델은 `schemas/`,
 HTTP와 독립적인 계산 및 검수 규칙은 `domain/`에 배치합니다.
+
+## 단계 0 공통 규칙
+
+- [API 계약](docs/api_contract.md): JSON·페이지네이션·날짜·금액·공통 오류 응답.
+- [CRM 지표 정의](docs/metric_definitions.md): 고객 상태, 기간 비교, 지표 분모와 매출 귀속 기준.
+- `app/core/errors.py`: 공통 오류와 `X-Request-ID`.
+- `app/core/time.py`: UTC 변환, Clock, 한국 날짜 범위 변환.
+- `app/schemas/common.py`: Pagination, Page, ReportingPeriod, Money.
+- `app/domain/analytics/`: 고객 상태·구매 경과일·비율 계산.
+
+고객·캠페인 DB 집계 API는 이후 단계에서 추가합니다. 기존 실행 명령은 동일합니다.
 
 ## 테스트
 
