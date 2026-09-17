@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.config import Settings
+from app.core.errors import ErrorResponse, install_error_handlers
+from app.core.time import SystemClock
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -13,6 +15,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version="0.1.0",
     )
     application.state.settings = settings
+    application.state.clock = SystemClock()
+    install_error_handlers(application)
 
     if settings.cors_origins:
         application.add_middleware(
@@ -20,9 +24,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_origins=settings.cors_origins,
             allow_methods=["*"],
             allow_headers=["*"],
+            expose_headers=["X-Request-ID"],
         )
 
-    application.include_router(api_router, prefix="/api/v1")
+    application.include_router(api_router, prefix="/api/v1", responses={
+        status: {"model": ErrorResponse} for status in (404, 409, 422, 500)
+    })
 
     @application.get("/", tags=["root"])
     async def root() -> dict[str, str]:
