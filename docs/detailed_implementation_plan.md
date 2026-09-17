@@ -6,6 +6,8 @@
 
 이 문서는 구현 예정 설계다. 아래 체크박스는 실제 개발과 검증이 끝났을 때 완료 처리한다. 원문에서 정하지 않은 값은 **MVP 기본안**이며, 제품 요구사항이 바뀌면 관련 테스트와 함께 변경한다.
 
+**포트폴리오 운영 기준:** 방문자는 첫 화면에서 바로 모든 기능을 체험한다. 계정 생성이나 로그인 없이 조회·편집·업로드·정책 설정·승인·모의 발송을 동일하게 제공한다. 프런트엔드는 HTML·CSS·JavaScript로 구현한다. 원문과 이 기준이 충돌하면 이 문서의 기준을 우선한다. 캠페인 승인은 누구나 직접 누를 수 있는 업무 검토 단계로 유지한다.
+
 ## 1. 출발점과 구현 범위
 
 ### 1.1 현재 구현된 것
@@ -14,14 +16,14 @@
 - `app/core/config.py`: 환경변수 설정.
 - `app/api/router.py`: `/api/v1` 공통 경로.
 - `app/api/routes/health.py`: 프로세스 상태 확인.
-- `tests/test_api.py`: HTTP 응답, 문서, CORS 테스트.
+- `tests/integration/test_api.py`: HTTP 응답, 문서, CORS 테스트.
 - `pyproject.toml`, `.env.example`, `README.md`: 설치 및 실행 기반.
 
-아직 DB, 인증, 업무 API, 프런트엔드, AI 연동은 없다. 기존 `app/`를 그대로 확장하고 프런트엔드만 `frontend/`에 추가한다. 패키지 설치로 생성되는 `*.egg-info/`나 `.venv/` 내부는 수정 대상이 아니다.
+아직 DB, 업무 API, 프런트엔드, AI 연동은 없다. 기존 `app/`를 그대로 확장하고 프런트엔드만 `frontend/`에 추가한다. 패키지 설치로 생성되는 `*.egg-info/`나 `.venv/` 내부는 수정 대상이 아니다.
 
 ### 1.2 완성할 사용자 흐름
 
-로그인 → 샘플 데이터 적재 → 대시보드 확인 → 세그먼트 미리보기와 저장 → 캠페인·A/B 카피 작성 → 정책 검수 → 담당자 승인 → 모의 발송 → 성과 비교 → AI 요약과 후속 초안 생성.
+첫 화면 접속 → 준비된 샘플 데이터 확인·추가 적재 → 대시보드 확인 → 세그먼트 미리보기와 저장 → 캠페인·A/B 카피 작성 → 정책 검수 → 방문자 직접 승인 → 모의 발송 → 성과 비교 → AI 요약과 후속 초안 생성.
 
 처음에는 수동 입력으로 이 흐름을 완성한다. AI는 이미 검증된 서비스 함수를 호출하는 방식으로 붙인다. 이메일을 첫 번째 수직 구현 대상으로 삼고, 최종 MVP에는 푸시와 SMS의 카피·채널별 검수·모의 발송도 포함한다.
 
@@ -30,7 +32,9 @@
 | 항목 | 실제 구현 기본안 | 이유 |
 | --- | --- | --- |
 | API 경로 | 모든 업무 API를 `/api/v1`에 배치 | 기존 프로젝트와 일치 |
-| JSON 이름 | 요청·응답 모두 `snake_case` | Python 모델과 프런트 타입의 변환 혼선 방지 |
+| JSON 이름 | 요청·응답 모두 `snake_case` | Python 모델과 JavaScript 객체 필드명 일치 |
+| 공개 체험 | 모든 방문자에게 모든 업무 기능 제공 | 첫 화면에서 전체 흐름 체험 |
+| 프런트엔드 | HTML·CSS·JavaScript와 브라우저 ES modules | 정적 파일로 실행·배포 |
 | 구매 정보 | `orders`, `order_items`, `products` 추가 | 재구매·카테고리·매출 계산의 원천 필요 |
 | 수신 동의 | 채널별 동의와 연락처 상태 추가 | 단일 boolean으로 이메일·푸시·SMS 동의를 대신하지 않음 |
 | 감사 기록 | AI 로그와 별도로 `audit_logs` 추가 | 수동 변경과 승인도 기록 |
@@ -46,9 +50,9 @@
 | --- | --- | --- | --- |
 | 0 | 공통 계약 고정 | 현재 기반 | API·지표·상태 규칙 문서 |
 | 1 | DB·마이그레이션·작업 기반 | 0 | DB 연결과 재시작 가능한 작업 |
-| 2 | 로그인·역할·감사 | 1 | 권한에 따른 조회와 승인 차단 |
+| 2 | 공개 데모·변경 이력 | 1 | 모든 기능 즉시 체험과 변경 기록 조회 |
 | 3 | 데이터 적재·샘플 생성 | 1, 2 | CSV 적재와 재현 가능한 데이터 |
-| 4 | 프런트 공통 구조 | 0, 2 | 로그인과 메뉴 이동 |
+| 4 | HTML·CSS·JavaScript 공통 구조 | 0, 2 | 대시보드 즉시 진입과 메뉴 이동 |
 | 5 | 고객 조회·지표 | 3, 4 | 실제 데이터 기반 대시보드 |
 | 6 | 세그먼트 엔진·화면 | 5 | 조건별 고객 수 확인과 저장 |
 | 7 | 캠페인·카피 수동 편집 | 6 | A/B 캠페인 초안 |
@@ -73,9 +77,9 @@ app/
   repositories/         # 쿼리와 데이터 저장
   services/             # 트랜잭션과 업무 규칙
   api/
-    deps.py             # DB 세션, 인증 사용자, 역할 검사
+    deps.py             # DB 세션, 데이터셋 선택, 공통 요청 정보
     router.py
-    routes/             # auth, customers, imports, dashboard 등
+    routes/             # customers, imports, dashboard, audit 등
   domain/
     segments/           # DSL, 컴파일, 필드 레지스트리
     campaigns/          # 상태 전환, A/B 배분
@@ -84,17 +88,20 @@ app/
   ai/                   # provider, schemas, prompts, tools, orchestrator
   workers/              # 작업 claim, 실행, 재시도
 alembic/versions/
-scripts/                # 샘플 생성, 데모 사용자 생성
+scripts/                # 샘플 생성과 데이터 재계산
 tests/
   unit/
   integration/
   fixtures/
 frontend/
+  index.html            # 첫 화면과 공통 HTML 구조
+  styles/               # tokens.css, layout.css, components.css
   src/
-    app/                # Router, QueryClient, 공통 레이아웃
-    api/                # API client와 생성 타입
-    components/         # 공통 표시 요소
-    features/           # auth, customers, segments, campaigns, reports, ai
+    app/                # main.js, router.js, store.js
+    api/                # fetch client.js, JSDoc과 응답 검증
+    components/         # 공통 DOM 생성과 이벤트 처리
+    features/           # customers, segments, campaigns, reports, ai의 JS 모듈
+  tests/                # 순수 JS 로직 단위 테스트
   e2e/
 docs/
 compose.yaml
@@ -102,32 +109,36 @@ Dockerfile
 .github/workflows/ci.yml
 ```
 
-요청 흐름은 `route → service → repository → DB`로 고정한다. 라우터는 검증·인증·응답에 집중한다. 여러 테이블을 함께 변경하는 트랜잭션은 서비스가 소유하고 repository에서 임의로 commit하지 않는다. AI 도구와 일반 화면은 같은 서비스를 재사용한다.
+요청 흐름은 `route → service → repository → DB`로 고정한다. 라우터는 입력 검증과 응답에 집중한다. 여러 테이블을 함께 변경하는 트랜잭션은 서비스가 소유하고 repository에서 임의로 commit하지 않는다. AI 도구와 일반 화면은 같은 서비스를 재사용한다.
 
 DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작업을 수행하는 HTTP 핸들러는 동기 함수로 구성하고, AI 비동기 호출을 연결할 때 DB 작업을 이벤트 루프에서 직접 실행하지 않는다. 외부 AI 응답을 기다리는 동안 DB 트랜잭션을 유지하지 않는다.
 
 ## 4. 단계 0 — 공통 계약과 업무 정의
 
+구현 완료: `docs/api_contract.md`, `docs/metric_definitions.md`, 공통 오류·기간·페이지네이션·금액 모델, Clock과 고객 상태·비율 계산. 단위·HTTP 테스트 17개 통과. 아래 저장·집계 규칙은 확정된 계약이며 실제 DB 적용과 업무별 집계 API는 후속 단계에서 구현한다.
+
+구현 과정과 검증 범위: [단계 0 구현 Walkthrough](phase_0_walkthrough.md). 아래 체크는 공통 코드 구현 또는 계약 확정을 의미한다. DB 저장·SQL 집계·프런트 연동 완료를 의미하지 않는다.
+
 ### 0-1. API 계약
 
-- [ ] `docs/api_contract.md`에 `/api/v1`, UUID, `snake_case`, 오류 형식을 정의한다.
-- [ ] 시간은 timezone이 있는 ISO 8601로 받고 UTC로 저장한다. 화면의 업무 시간대는 `Asia/Seoul`을 기본값으로 한다.
-- [ ] 기간 집계는 `[from, to)`로 한다. 화면의 종료일 포함 선택은 다음 날 자정의 배타적 상한으로 변환한다.
-- [ ] 목록은 `items`, `total`, `page`, `page_size`로 반환한다. 기본 20건, 최대 100건으로 제한한다.
-- [ ] 잘못된 입력 422, 미인증 401, 권한 없음 403, 없음 404, 상태·버전 충돌 409를 사용한다.
-- [ ] `error.code`, `error.message`, `error.details`, `request_id` 오류 응답을 구현한다. 검증 오류도 같은 형식으로 변환한다.
-- [ ] 금액은 DB `Numeric`과 Python `Decimal`을 사용하고 JSON에서는 문자열로 전달한다. 통화는 MVP에서 KRW로 고정한다.
+- [x] `docs/api_contract.md`에 `/api/v1`, UUID, `snake_case`, 오류 형식을 정의한다.
+- [x] timezone 포함 시각의 UTC 정규화와 `Asia/Seoul` 날짜 변환을 구현한다. DB의 UTC 저장은 계약으로 확정하고 단계 1에서 적용한다.
+- [x] 기간 집계는 `[from, to)`로 한다. 화면의 종료일 포함 선택은 다음 날 자정의 배타적 상한으로 변환한다.
+- [x] 목록은 `items`, `total`, `page`, `page_size`로 반환한다. 기본 20건, 최대 100건으로 제한한다.
+- [x] 잘못된 입력 422, 없음 404, 상태·버전 충돌 409를 사용한다.
+- [x] `error.code`, `error.message`, `error.details`, `request_id` 오류 응답을 구현한다. 검증 오류도 같은 형식으로 변환한다.
+- [x] Python `Decimal`과 JSON 금액 문자열을 구현한다. KRW 단일 통화·DB `Numeric` 사용은 계약으로 확정하고 DB 컬럼은 단계 1에서 구현한다.
 
 **완료 기준:** 프런트와 백엔드가 동일한 요청 예시·오류 예시를 사용하며, 빈 결과와 0 나누기의 표현이 정해져 있다.
 
 ### 0-2. 기준 시점과 고객 상태
 
-- [ ] `docs/metric_definitions.md`에 계산 기준을 작성한다.
-- [ ] 서비스에 `reference_at` 또는 Clock 의존성을 전달해 테스트에서 시간을 고정한다.
-- [ ] MVP 상태 기본안: 탈퇴가 최우선, 가입 후 미구매 30일 미만은 ACTIVE, 30~59일은 CHURN_RISK, 60일 이상은 DORMANT. 구매 고객은 마지막 구매 기준으로 같은 30/60일 경계를 적용한다.
-- [ ] 상태와 별개로 활성 고객 KPI는 선택 기간에 VIEW·CART·PURCHASE 중 하나 이상 발생한 고객으로 정의한다. 상태 분포와 혼용하지 않는다.
-- [ ] `days_since_last_purchase`는 구매가 없으면 `null`로 처리한다. 휴면 VIP의 `GTE 60`에는 미구매 고객이 자동 포함되지 않는다.
-- [ ] 미래 이벤트는 기준 시점 집계에서 제외한다. 이벤트 시각과 실제 적재 시각을 구분한다.
+- [x] `docs/metric_definitions.md`에 계산 기준을 작성한다.
+- [x] 계산 함수에 `reference_at`을 전달하고 Clock·FixedClock·공통 의존성을 구현한다. 업무 서비스 연결은 해당 서비스 구현 시 진행한다.
+- [x] MVP 상태 기본안: 탈퇴가 최우선, 가입 후 미구매 30일 미만은 ACTIVE, 30~59일은 CHURN_RISK, 60일 이상은 DORMANT. 구매 고객은 마지막 구매 기준으로 같은 30/60일 경계를 적용한다.
+- [x] 상태와 별개로 활성 고객 KPI는 선택 기간에 VIEW·CART·PURCHASE 중 하나 이상 발생한 고객으로 정의한다. 상태 분포와 혼용하지 않는다.
+- [x] `days_since_last_purchase`는 구매가 없으면 `null`로 처리한다. 휴면 VIP의 `GTE 60`에는 미구매 고객이 자동 포함되지 않는다.
+- [x] 미래 이벤트 제외와 발생·적재 시각 구분을 계약으로 확정한다. 미래 구매 입력의 오류 처리를 구현하며 원천 조회·집계 쿼리는 후속 단계에서 구현한다.
 
 **완료 기준:** 29/30/59/60일, 자정, 미구매, 탈퇴 고객의 결과를 작은 고정 데이터로 설명할 수 있다.
 
@@ -146,16 +157,18 @@ DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작�
 
 | 마이그레이션 묶음 | 테이블 | 핵심 제약·추가 필드 |
 | --- | --- | --- |
-| 001 사용자 | `users`, `user_sessions`, `audit_logs` | email unique, password_hash, role, 세션 만료·폐기, actor/resource/action |
+| 001 데모 이력 | `datasets`, `audit_logs` | dataset_id, actor_type, resource_id, action, request_id |
 | 002 고객 원천 | `customers`, `customer_channels`, `products`, `orders`, `order_items`, `customer_events` | external_id unique, 고객+채널 unique, 외부 주문·이벤트 ID unique |
 | 003 적재·작업 | `import_batches`, `jobs`, `dataset_versions` | job 상태, 재시도, 오류 요약, 데이터 버전 |
-| 004 세그먼트 | `segments`, `segment_revisions` | condition_json, version, reference_at, created_by, archived_at |
+| 004 세그먼트 | `segments`, `segment_revisions` | condition_json, version, reference_at, created_source, archived_at |
 | 005 캠페인 | `campaigns`, `campaign_variants`, `campaign_exclusions` | version, segment_revision_id, 채널, 쿠폰 만료, KPI, A/B 비율 |
-| 006 검수·승인 | `validation_runs`, `validation_recipients`, `approvals` | campaign_version, policy_version, data_version, 대상 집합, 결정자 |
+| 006 검수·승인 | `validation_runs`, `validation_recipients`, `approvals` | campaign_version, policy_version, data_version, 대상 집합, decision_source, decided_at |
 | 007 실행·성과 | `campaign_runs`, `campaign_deliveries`, `campaign_events` | idempotency key, 승인 ID, variant_id, event external_id, order_id |
 | 008 AI | `ai_execution_logs`, `ai_action_proposals` | 작업 종류, provider, 모델, 상태, 제안 payload/hash, 확인·만료 시각 |
 
 `customer_channels`에는 EMAIL/PUSH/SMS, 동의 여부·변경 시각, 연락처 또는 토큰, 유효성, hard bounce 상태를 둔다. 기존 `marketing_consent`를 수입할 때 이메일 동의로만 매핑하고 나머지 채널은 기본 미동의로 둔다.
+
+업무 테이블·작업·정책·AI 제안에는 dataset_id를 연결한다. 외부 ID unique는 dataset 안에서 적용하고 다른 dataset의 리소스를 연결하는 요청은 거절한다. dataset은 누구나 선택·조회·편집할 수 있다. 작성·승인 이력은 created_source와 decision_source로 VISITOR/AI/SYSTEM을 기록하며 사용자 FK를 두지 않는다.
 
 `orders`는 구매 지표의 원천이다. PURCHASE 이벤트는 주문 ID를 참조하고 매출에 다시 더하지 않는다. MVP는 완료 주문 금액을 사용하며 취소·전액 환불은 제외한다. 부분 환불은 미지원으로 명시하고 적재 시 오류로 처리한다.
 
@@ -181,39 +194,31 @@ DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작�
 
 **완료 기준:** 빈 DB 설치 성공, FK/중복 위반 차단, DB 장애 시 readiness 실패, worker 강제 종료 후 재시작해 작업을 중복 없이 마친다.
 
-## 6. 단계 2 — 인증·권한·감사 이력
+## 6. 단계 2 — 공개 데모와 변경 이력
 
-### 2-1. 로그인과 세션
+### 2-1. 즉시 체험 가능한 진입 흐름
 
-- [ ] `core/security.py`, `models/user.py`, `schemas/auth.py`, `services/auth.py`, `routes/auth.py`를 만든다.
-- [ ] 비밀번호는 검증된 해시 라이브러리로 저장한다. 직접 암호 알고리즘을 만들지 않는다.
-- [ ] `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`을 구현한다.
-- [ ] MVP는 서버 저장형 세션을 사용한다. 임의 세션 토큰의 해시만 DB에 저장하고 HttpOnly 쿠키로 원본을 전달한다.
-- [ ] 배포는 프런트와 `/api`를 같은 origin으로 제공한다. 운영 쿠키는 Secure, SameSite=Lax로 설정하고 변경 요청은 CSRF 토큰과 Origin을 확인한다.
-- [ ] 로컬 프런트는 Vite proxy를 사용한다. 별도 origin 배포를 택하면 쿠키·CORS·CSRF 설정을 함께 재설계한다.
-- [ ] 데모 계정은 별도 생성 명령으로 만든다. 공개 기본 비밀번호나 자동 관리자 생성을 운영에 넣지 않는다.
+- [ ] 첫 방문에서 대시보드를 표시하고 모든 메뉴와 업무 버튼을 제공한다.
+- [ ] 데모는 공개된 합성 데이터를 함께 사용하는 기본안으로 구성한다. 방문자가 작성부터 승인·반려·모의 발송까지 연속 수행할 수 있게 한다.
+- [ ] 사용자 테이블이나 사용자 FK 없이 업무 데이터를 저장한다. 기록의 실행 주체는 `actor_type=VISITOR|AI|SYSTEM`으로 구분하며 개인 신원을 뜻하지 않는다.
+- [ ] DB 연결 정보와 AI 키는 서버 환경변수에만 둔다. 방문자는 키를 입력하지 않고 화면에서 기능을 실행한다.
 
-### 2-2. 권한표를 서버에서 적용
+### 2-2. 공동 체험 데이터와 충돌 처리
 
-| 작업 | MARKETER | REVIEWER | ADMIN |
-| --- | --- | --- | --- |
-| 고객·성과 조회 | 허용 | 허용 | 허용 |
-| 세그먼트·캠페인 편집 | 허용 | 읽기만 | 허용 |
-| 승인 요청 | 허용 | 불가 | 허용 |
-| 승인·반려 | 불가 | 허용 | 허용 |
-| 승인된 캠페인 모의 발송 | 허용 | 불가 | 허용 |
-| 데이터 적재·정책 설정 | 불가 | 불가 | 허용 |
-
-자기 승인 금지를 MVP 기본안으로 한다. 데모에서도 작성자와 승인자 계정을 분리한다. 로그인 제한과 세션 만료는 설정값으로 둔다.
+- [ ] 샘플 데이터가 준비된 상태로 공개하고, 업로드 화면에는 즉시 사용할 수 있는 합성 CSV 예제를 제공한다.
+- [ ] 같은 데이터에서 여러 방문자가 작업할 수 있다는 점을 화면에 표시한다.
+- [ ] 동시 수정은 version 검사로 409를 반환하고 최신 상태를 다시 불러올 수 있게 한다.
+- [ ] 준비된 샘플을 다시 불러오는 작업은 새로운 dataset을 생성한다. 진행 중인 작업의 dataset을 덮어쓰지 않는다.
+- [ ] 페이지 새로고침 시 URL의 dataset과 리소스 ID로 작업 화면을 복원한다. dataset은 데이터 선택값이며 접근 제한 수단으로 사용하지 않는다.
 
 ### 2-3. 감사 이벤트
 
-- [ ] `services/audit.py`에서 actor, resource_id, action, 이전/이후 version, request_id, 시각을 저장한다.
+- [ ] `services/audit.py`에서 actor_type, dataset_id, resource_id, action, 이전/이후 version, request_id, 시각을 저장한다.
 - [ ] 생성·수정·삭제(보관)·승인·반려·발송 요청을 업무 변경과 같은 트랜잭션에 기록한다.
-- [ ] 이메일·비밀번호·세션 토큰은 감사 JSON과 애플리케이션 로그에서 제외한다.
-- [ ] `GET /audit-logs`는 ADMIN 조회, 캠페인 상세 이력은 해당 기능의 조회 권한으로 제한한다.
+- [ ] 고객 연락처와 서버 비밀값은 감사 JSON과 애플리케이션 로그에서 제외한다.
+- [ ] `GET /audit-logs`와 캠페인 상세 이력을 누구나 조회할 수 있게 한다.
 
-**완료 기준:** 직접 HTTP 요청으로도 권한 우회가 안 된다. 로그아웃된 세션은 실패하고, 실패한 업무 트랜잭션의 변경 이력이 성공으로 남지 않는다.
+**완료 기준:** 새 브라우저에서 바로 모든 메뉴를 열고 캠페인 작성·승인·모의 발송을 수행할 수 있다. 동시 변경 충돌은 안내되고 실패한 업무 변경이 성공 이력으로 남지 않는다.
 
 ## 7. 단계 3 — 데이터 업로드와 샘플 데이터
 
@@ -254,20 +259,24 @@ DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작�
 
 **완료 기준:** 같은 seed와 기준 시점이면 같은 지표가 나온다. 동일 파일 재업로드가 숫자를 늘리지 않는다. 오류 CSV는 업무 데이터에 반영되지 않는다.
 
-## 8. 단계 4 — 프런트엔드 공통 기반
+## 8. 단계 4 — HTML·CSS·JavaScript 공통 기반
 
-- [ ] `frontend/`에 원문 스택인 React·TypeScript·Vite를 구성하고 lockfile을 커밋한다.
-- [ ] UI는 Tailwind CSS와 shadcn/ui로 통일한다. Router, TanStack Query, React Hook Form, Zod, Recharts를 필요한 화면 단계에서 추가한다.
-- [ ] 공통 API client에서 쿠키·CSRF·request_id·오류 변환을 처리한다. OpenAPI 기반 타입을 생성하는 명령을 추가한다.
-- [ ] 좌측 메뉴, 중앙 콘텐츠, 상단 기간 필터, 우측 AI 패널의 레이아웃을 만든다.
-- [ ] 로그인·401 리다이렉트·403 화면과 역할별 메뉴를 구현한다.
-- [ ] 로딩, 빈 데이터, 오류, 재시도, 저장 중, 저장 실패 상태를 공통 컴포넌트로 만든다.
-- [ ] 기간·페이지·검색어는 URL과 동기화해 새로고침 후 복구한다.
-- [ ] 미완성 메뉴는 빈 성공 화면을 표시하지 않고 숨기거나 준비 중으로 표시한다.
+- [ ] `frontend/index.html`에 시맨틱 HTML 레이아웃을 만들고 `type="module"`로 `src/app/main.js`를 로드한다. 번들링 없이 브라우저 ES modules를 사용한다.
+- [ ] `styles/tokens.css`에 색상·간격·타이포그래피 변수, `layout.css`에 Grid/Flex 레이아웃, `components.css`에 공통 UI 스타일을 작성한다.
+- [ ] `src/api/client.js`에 fetch 기반 요청, 응답 상태·JSON 검사, request_id, 오류 변환, AbortController 취소 처리를 모은다.
+- [ ] OpenAPI 요청·응답 예시를 기준으로 JSDoc과 필요한 응답 검증 함수를 작성한다. 입력은 HTML 제약 검증과 JavaScript로 검사하고 서버가 최종 검증한다.
+- [ ] `src/app/router.js`에서 hash 기반 화면 전환을 처리하고 `store.js`에서 현재 dataset·기간·선택 항목·로딩 상태를 관리한다.
+- [ ] 좌측 메뉴, 중앙 콘텐츠, 상단 기간 필터, 우측 AI 패널을 구성하고 누구나 모든 메뉴에 접근하게 한다.
+- [ ] 공통 DOM 생성 함수를 `src/components/`에 두고 로딩·빈 데이터·오류·재시도·저장 중·실패 상태를 구현한다.
+- [ ] 동적 문자열은 textContent로 표시한다. 화면 전환 시 이벤트 리스너와 이전 요청을 정리한다.
+- [ ] 차트는 SVG 또는 Canvas와 JavaScript로 작성하고 동일 수치의 표와 접근 가능한 설명을 제공한다.
+- [ ] 기간·페이지·검색어·dataset을 URL과 동기화하고 저장 성공 후 관련 API를 다시 조회해 화면을 갱신한다.
+- [ ] FastAPI가 `/`에서 index.html, `/static`에서 프런트 정적 파일을 제공하고 `/api/v1`은 업무 API로 유지한다. 기존 `/`의 API 정보는 `/api/v1/info`로 옮기고 기존 테스트를 갱신한다.
+- [ ] 로컬·배포 모두 HTTP로 제공해 같은 origin에서 `/api/v1`을 호출한다. 개발 실행에 프런트 빌드 서버를 요구하지 않는다.
 
-**산출물:** `frontend/src/app/`, `api/client.ts`, `features/auth/`, 레이아웃.
+**산출물:** `frontend/index.html`, `styles/*.css`, `src/app/*.js`, `src/api/client.js`, 공통 DOM 모듈.
 
-**완료 기준:** 로그인 후 메뉴 이동·새로고침·만료 처리가 동작하고, 1280px 데스크톱에서 AI 패널을 열어도 본문 주요 버튼이 가려지지 않는다.
+**완료 기준:** 기본 API 실행 명령으로 첫 화면과 정적 파일이 로드된다. 메뉴 이동·뒤로 가기·새로고침이 동작하고, 1280px 데스크톱에서 AI 패널을 열어도 본문 주요 버튼이 가려지지 않는다.
 
 ## 9. 단계 5 — 고객과 대시보드
 
@@ -387,7 +396,7 @@ DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작�
 | 5 | 같은 캠페인 기수신 | campaign_deliveries |
 | 6 | 일일·주간 노출 초과 | 채널별 최근 발송·예약된 대상 |
 
-MVP 노출 한도 기본안은 채널별 1일 1회·최근 7일 3회다. 1일은 업무 시간대의 당일 구간, 7일은 실행 시각 기준 이동 구간으로 명시한다. 정책값은 Settings에서 ADMIN이 변경하고 version을 증가시킨다.
+MVP 노출 한도 기본안은 채널별 1일 1회·최근 7일 3회다. 1일은 업무 시간대의 당일 구간, 7일은 실행 시각 기준 이동 구간으로 명시한다. 정책값은 누구나 Settings에서 변경할 수 있고 변경 시 version을 증가시킨다.
 
 - [ ] `domain/policies/`의 순수 규칙과 대상 조회를 분리한다.
 - [ ] 고객이 여러 규칙에 걸리면 모든 사유를 보관하되 집계표의 primary_reason은 최초 사유 하나만 사용한다.
@@ -400,7 +409,7 @@ MVP 노출 한도 기본안은 채널별 1일 1회·최근 7일 3회다. 1일은
 - [ ] `validation_runs`에 campaign/segment/policy/data version, reference_at, content_hash, count, 만료 시각을 둔다.
 - [ ] MVP 검수 유효시간은 30분으로 한다. 정책 변경·캠페인 변경 시 즉시 무효다.
 - [ ] `POST /request-approval`은 현재 version의 유효한 검수가 있을 때만 REVIEW로 전환한다.
-- [ ] `POST /approve`, `POST /reject`는 승인 요청 ID와 version을 확인하고 결정자를 서버 세션에서 얻는다.
+- [ ] `POST /approve`, `POST /reject`는 승인 요청 ID와 version을 확인하고 decision_source=VISITOR와 결정 시각을 기록한다. 작성한 방문자가 그대로 승인·반려할 수 있다.
 - [ ] 승인 후 카피·혜택·타깃을 변경하려면 먼저 DRAFT로 되돌리고 기존 승인을 무효화한다.
 - [ ] 세그먼트 원본이 수정되어도 캠페인은 저장된 revision을 유지한다. 새 revision 적용은 명시적 편집이다.
 
@@ -410,16 +419,16 @@ MVP 노출 한도 기본안은 채널별 1일 1회·최근 7일 3회다. 1일은
 | --- | --- | --- | --- |
 | DRAFT | 검수 | DRAFT | 검수 결과만 저장 |
 | DRAFT | 승인 요청 | REVIEW | 최신 검수 통과·대상 1명 이상 |
-| REVIEW | 승인 | APPROVED | reviewer 권한·자기 승인 아님·version 일치 |
-| REVIEW | 반려/요청 철회 | DRAFT | 사유 또는 요청자 확인 |
+| REVIEW | 승인 | APPROVED | 방문자 확인·유효한 검수·version 일치 |
+| REVIEW | 반려/요청 철회 | DRAFT | 사유 또는 방문자 확인 |
 | APPROVED | 편집 재개 | DRAFT | 기존 승인 무효화 |
 | APPROVED | 모의 발송 요청 | RUNNING | 유효 승인·실행 직전 검수·멱등 키 |
 | RUNNING | 작업 완료 | COMPLETED | 모든 대상 결과 확정 |
 | DRAFT/REVIEW/APPROVED | 취소 | CANCELLED | 실행 시작 전 |
 
-RUNNING 중 오류는 캠페인 상태를 임의로 DRAFT로 되돌리지 않고 run/job을 FAILED로 기록한다. 동일 실행을 재개하거나 관리자 복구 절차를 따른다. RUNNING 취소·PAUSED·SCHEDULED는 MVP API에서 거절한다.
+RUNNING 중 오류는 캠페인 상태를 임의로 DRAFT로 되돌리지 않고 run/job을 FAILED로 기록한다. 동일 실행을 재개하거나 작업 복구 절차를 따른다. RUNNING 취소·PAUSED·SCHEDULED는 MVP API에서 거절한다.
 
-**완료 기준:** 승인 전 발송 409, MARKETER 승인 403, 오래된 검수 승인 409, 승인 후 수정 시 재승인이 필요하다. 동시 승인 요청 중 하나만 성공한다.
+**완료 기준:** 누구나 승인할 수 있으며 승인 전 발송과 오래된 검수 승인은 409로 처리한다. 승인 후 수정 시 재승인이 필요하다. 동시 승인 요청 중 하나만 성공한다.
 
 ## 13. 단계 9 — 모의 발송과 성과 이벤트
 
@@ -510,7 +519,7 @@ RUNNING 중 오류는 캠페인 상태를 임의로 DRAFT로 되돌리지 않고
 - [ ] `POST /ai/campaign-draft`, `/ai/copy-variants`에 집계 프로파일, 사용자가 정한 목표·혜택, 채널·브랜드 정책을 제공한다.
 - [ ] A/B 제목·본문·가설·생성 근거를 반환한다. 할인율·쿠폰 만료·실제 혜택은 입력에 없는 값을 지어내지 못하게 검증한다.
 - [ ] AI 결과는 편집 가능한 제안으로 표시한다. 사용자가 적용하면 일반 캠페인 저장 서비스가 version과 감사를 처리한다.
-- [ ] 브랜드 가이드는 MVP에서 ADMIN이 관리하는 짧은 설정 문서로 공급한다. RAG가 없어도 카피 생성이 가능해야 한다.
+- [ ] 브랜드 가이드는 누구나 Settings에서 편집할 수 있는 짧은 데모 설정 문서로 공급한다. RAG가 없어도 카피 생성이 가능해야 한다.
 
 ### 11-4. 성과 분석
 
@@ -522,7 +531,7 @@ RUNNING 중 오류는 캠페인 상태를 임의로 DRAFT로 되돌리지 않고
 
 ### 11-5. AI 로그와 평가 데이터
 
-- [ ] 사용자·작업·모델·prompt version·입출력 요약·시간·토큰 사용량·성공/실패를 기록한다.
+- [ ] actor_type·dataset_id·작업·모델·prompt version·입출력 요약·시간·토큰 사용량·성공/실패를 기록한다.
 - [ ] 자유 입력에 개인정보가 포함될 수 있으므로 모델 전달 전 제거·차단하고 로그에도 원문을 무조건 저장하지 않는다.
 - [ ] 한국어 조건 해석 평가셋을 만든다: 기간 경계, 30만 원, 미구매, OR, 부정 조건, 모호한 VIP, 금지 필드 등.
 - [ ] CI는 고정 mock 응답으로 실행한다. live 검증은 별도 명령으로 실제 API 성공·거절·timeout을 확인한다.
@@ -534,16 +543,16 @@ RUNNING 중 오류는 캠페인 상태를 임의로 DRAFT로 되돌리지 않고
 ### 12-1. 도구 레지스트리
 
 - [ ] `ai/tools.py`에 get_metric, preview_segment, create_segment_draft, create_campaign_draft, generate_copy, validate_campaign, analyze_campaign을 등록한다.
-- [ ] 도구 호출 인자를 스키마 검증하고 인증 사용자·권한·허용 리소스를 서버에서 주입한다.
+- [ ] 도구 호출 인자를 스키마 검증하고 선택한 dataset과 리소스의 존재·버전·업무 상태를 서버에서 확인한다.
 - [ ] 모델은 도구 호출을 제안하고 서버가 함수를 실행한다. 호출 이름을 임의의 함수명·SQL·URL로 해석하지 않는다. 구현 참고: [OpenAI Function Calling](https://developers.openai.com/api/docs/guides/function-calling).
 - [ ] 도구 호출 횟수·전체 실행 시간·출력 크기를 제한하고 무한 반복 시 종료한다.
-- [ ] validate_campaign은 검수 기록을 남기는 제한적 쓰기로 취급한다. 승인·발송 권한을 이 도구에 포함하지 않는다.
+- [ ] validate_campaign은 검수 기록을 남기는 제한적 쓰기로 취급한다. 승인·발송 동작을 이 도구에 포함하지 않는다.
 
 ### 12-2. 확인 가능한 액션 제안
 
-- [ ] 저장·승인 요청은 `ai_action_proposals`에 정규화된 payload, hash, 사용자, resource version, 만료 시각을 저장한다.
+- [ ] 저장·승인 요청은 `ai_action_proposals`에 정규화된 payload, hash, dataset_id, actor_type, resource version, 만료 시각을 저장한다.
 - [ ] 패널에 조건·카피·변경 내용을 보여주고 사용자가 적용 버튼을 누르게 한다.
-- [ ] `POST /ai/actions/{proposal_id}/confirm`에서 사용자·만료·버전·이미 실행 여부를 검사한 후 일반 업무 서비스를 호출한다.
+- [ ] `POST /ai/actions/{proposal_id}/confirm`에서 dataset·만료·버전·이미 실행 여부를 검사한 후 일반 업무 서비스를 호출한다.
 - [ ] 수정된 payload는 기존 확인을 재사용하지 않고 새 제안을 만든다.
 - [ ] 승인 결정과 모의 발송은 각각 승인 화면·캠페인 실행 버튼으로 수행한다. AI 도구 목록에 무인 승인·발송을 노출하지 않는다.
 - [ ] 프런트가 `confirmed=true`만 보내면 실행되는 방식은 사용하지 않는다.
@@ -552,7 +561,7 @@ RUNNING 중 오류는 캠페인 상태를 임의로 DRAFT로 되돌리지 않고
 
 - [ ] `POST /ai/chat` 응답을 message, result_type, data, actions, reference_at, request_id로 통일한다.
 - [ ] 세그먼트 미리보기·카피 비교·검수 결과·성과 분석 카드 renderer를 분리한다.
-- [ ] 저장 성공 시 해당 Query cache를 갱신하고 상세 화면으로 이동할 수 있게 한다.
+- [ ] 저장 성공 시 관련 데이터를 fetch로 다시 조회하고 store와 DOM을 갱신해 상세 화면으로 이동할 수 있게 한다.
 - [ ] 실패 후 재시도와 확인 버튼 중복 클릭을 처리한다. 확인된 제안은 다시 실행하지 않는다.
 - [ ] 현재 화면 ID·기간·선택 세그먼트만 문맥으로 전달한다. 화면의 전체 고객 테이블을 프롬프트에 넣지 않는다.
 - [ ] 대화 전문의 장기 저장은 확장 기능으로 두되 모든 AI 실행·확인 액션 로그는 MVP에서 보존한다.
@@ -567,32 +576,33 @@ RUNNING 중 오류는 캠페인 상태를 임의로 DRAFT로 되돌리지 않고
 | --- | --- | --- |
 | 단위 | `tests/unit/` | DSL, 상태 전환, 제외 우선순위, 배정, 지표 계산 |
 | DB 통합 | `tests/integration/` | 실제 PostgreSQL의 FK·JSONB·잠금·트랜잭션·멱등성 |
-| API | `tests/integration/` | 로그인·권한·업로드·업무 HTTP 흐름 |
-| 프런트 | `frontend/src/**/*.test.*` | 조건 편집, 검수 사유, 오류·미집계 표시 |
-| E2E | `frontend/e2e/` | 두 역할로 승인하고 모의 발송 후 성과 확인 |
+| API | `tests/integration/` | 공개 접근·업로드·업무 HTTP 흐름 |
+| 프런트 | `frontend/tests/*.test.js` | 순수 JS 조건 변환·입력 검증·응답 처리 |
+| E2E | `frontend/e2e/` | DOM 표시·한 방문자의 작성·승인·모의 발송·성과 확인 |
 | AI 평가 | `tests/fixtures/ai/` 및 별도 실행기 | 조건 의미 일치, 잘못된 출력 차단, live 연결 |
 
 SQLite로 통과한 테스트를 PostgreSQL 잠금·JSONB 검증의 대체로 삼지 않는다. CI는 전용 DB를 사용하고 실제 운영 DB 주소로 테스트를 실행하지 못하도록 검사한다.
 
 ### 13-2. CI와 배포
 
-- [ ] GitHub Actions에서 의존성 설치, lint/typecheck, pytest, 프런트 테스트/build, OpenAPI 타입 갱신 누락을 검사한다.
+- [ ] GitHub Actions에서 백엔드 의존성 설치·lint·pytest, JavaScript 문법·단위 테스트, 브라우저 E2E와 정적 파일 로딩을 검사한다. 프런트 빌드 단계는 두지 않는다.
+- [ ] 순수 JavaScript 테스트는 Node 내장 테스트 러너로, DOM·사용자 흐름은 Playwright의 JavaScript 테스트로 검증한다. 테스트 도구용 package.json과 lockfile은 추가하되 사이트 실행에는 Node를 요구하지 않는다.
 - [ ] Docker 이미지에 API와 worker 실행 경로를 제공한다. migration은 별도 일회 작업으로 수행한다.
 - [ ] 프런트·API는 같은 origin 경로로 노출하고 DB는 외부 공개하지 않는 배포 구성을 작성한다.
 - [ ] 배포 업체 선택은 실제 계정·예산·서비스 제한 확인 후 한다. 아직 선택되지 않은 업체에 종속되는 코드를 만들지 않는다.
-- [ ] 운영 설정에 DB/세션 비밀값·AI 키를 환경변수로 주입하고 공개 데모에서는 합성 고객만 사용한다.
+- [ ] 운영 설정에 DB 연결 비밀값·AI 키를 환경변수로 주입하고 공개 데모에서는 합성 고객만 사용한다.
 - [ ] readiness, worker heartbeat, 실패 job 수, AI 실패율·응답 시간 로그를 확인한다.
 - [ ] DB 백업 복원과 직전 앱 이미지 재배포 절차를 `docs/deployment_runbook.md`에 작성하고 한 번 실행한다.
 
 ### 13-3. 대표 시연
 
-1. MARKETER로 로그인해 재구매율 하락과 집계 기간을 확인한다.
+1. 첫 화면을 열어 준비된 샘플 데이터의 재구매율 하락과 집계 기간을 확인한다.
 2. 휴면 VIP 조건을 AI에 요청하고 DSL·기준 시점·대상 수를 확인한다.
 3. 세그먼트를 저장한 뒤 이메일 캠페인을 생성한다.
 4. A/B 카피를 생성하고 혜택 또는 표현을 직접 수정한다.
 5. 검수에서 미동의·중복·오류 연락처가 제외되는 것을 확인한다.
-6. REVIEWER로 로그인해 동일 campaign version을 승인한다.
-7. MARKETER가 모의 발송하고 진행률·결과를 확인한다.
+6. 같은 화면에서 방문자가 동일 campaign version을 직접 승인한다.
+7. 이어서 모의 발송하고 진행률·결과를 확인한다.
 8. A/B 결과·모의 데이터 표기·판단 한계를 확인한다.
 9. AI 분석에서 근거 지표와 다음 실험 제안을 확인하고 새 초안을 만든다.
 10. 푸시·SMS도 채널 동의와 카피 제한이 적용되는 짧은 보조 시연을 수행한다.
@@ -608,10 +618,10 @@ SQLite로 통과한 테스트를 PostgreSQL 잠금·JSONB 검증의 대체로 �
 | 01 | API·지표 계약 | 1~2 | `docs: API 계약과 CRM 지표 기준 정의` |
 | 02 | DB·초기 migration | 2~3 | `feat(db): PostgreSQL 연결과 초기 스키마 추가` |
 | 03 | 작업 worker | 2~3 | `feat(jobs): 작업 실행과 재시도 기반 구현` |
-| 04 | 로그인·권한·감사 | 2~4 | `feat(auth): 역할 기반 로그인과 감사 이력 구현` |
+| 04 | 공개 데모·변경 이력 | 1~2 | `feat(demo): 즉시 체험 흐름과 변경 이력 구현` |
 | 05 | 데이터 적재 | 3~5 | `feat(data): CSV 검증과 중복 없는 적재 구현` |
 | 06 | 샘플 생성 | 1~2 | `feat(data): 재현 가능한 CRM 데모 데이터 생성` |
-| 07 | 프런트 기반 | 2~3 | `feat(web): 로그인과 대시보드 공통 레이아웃 추가` |
+| 07 | HTML·CSS·JavaScript 기반 | 2~3 | `feat(web): HTML·CSS·JavaScript 대시보드 기반 추가` |
 | 08 | 고객·KPI | 3~5 | `feat(analytics): 고객 조회와 CRM 지표 대시보드 구현` |
 | 09 | DSL·미리보기 | 3~5 | `feat(segments): 조건 검증과 대상자 미리보기 구현` |
 | 10 | 세그먼트 화면 | 2~3 | `feat(segments): 조건 빌더와 세그먼트 저장 화면 추가` |
@@ -623,7 +633,7 @@ SQLite로 통과한 테스트를 PostgreSQL 잠금·JSONB 검증의 대체로 �
 | 16 | AI 분석·패널 | 3~5 | `feat(ai): 성과 분석과 확인 기반 업무 실행 연결` |
 | 17 | E2E·배포·시연 | 3~5 | `test: 캠페인 운영 전체 시나리오 검증` |
 
-합계는 약 42~70 작업일이며 피드백·재작업 여유는 별도다. 빠른 1차 시연은 01~14의 핵심 이메일 흐름으로 만들고, 최종 MVP 판정은 모든 필수 기능과 19절 기준으로 한다.
+합계는 약 41~68 작업일이며 피드백·재작업 여유는 별도다. 빠른 1차 시연은 01~14의 핵심 이메일 흐름으로 만들고, 최종 MVP 판정은 모든 필수 기능과 19절 기준으로 한다.
 
 ## 19. 요구사항 추적과 최종 체크리스트
 
@@ -635,14 +645,16 @@ SQLite로 통과한 테스트를 PostgreSQL 잠금·JSONB 검증의 대체로 �
 | 세그먼트 프로파일 | 6, 11 | 집계 근거와 기준 시점 표시 |
 | 캠페인 초안·3채널 A/B 카피 | 7, 11 | 저장·수정·채널별 검수 |
 | 동의·중복·피로도 정책 | 8, 9 | 제외 합계와 동시 실행 테스트 |
-| 담당자 승인·모의 발송 | 8, 9 | 미승인 차단과 재시도 멱등성 |
+| 방문자 직접 승인·모의 발송 | 8, 9 | 업무 검토 후 실행과 재시도 멱등성 |
 | 성과 대시보드·실험 비교 | 10 | 분모·매출 귀속·판단 보류 테스트 |
 | AI 요약·후속 추천 | 11, 12 | 근거 ID와 확인 후 새 초안 |
-| AI 실행·사용자 변경 기록 | 2, 11, 12 | actor/version/request_id 연결 |
+| AI 실행·방문자 변경 기록 | 2, 11, 12 | actor_type/dataset_id/version/request_id 연결 |
 | Reports·CSV | 10 | 화면 수치와 내보내기 일치 |
 | Data & Integrations·Settings | 3, 8 | 적재 상태와 버전 있는 정책 설정 |
 
 - [ ] 승인되지 않은 캠페인은 어떤 API 경로에서도 실행되지 않는다.
+- [ ] 새 방문자가 첫 화면부터 조회·업로드·편집·정책 설정·승인·모의 발송을 모두 체험한다.
+- [ ] HTML·CSS·JavaScript 정적 파일이 별도 빌드 없이 로드되고 모든 화면이 업무 API와 연결된다.
 - [ ] 실행 시점에 미동의·탈퇴 고객은 발송 결과에 포함되지 않는다.
 - [ ] A/B 고객 교집합은 0명이고 재시도해도 배정이 같다.
 - [ ] 승인된 내용과 실행 내용의 version/hash가 일치한다.
@@ -661,7 +673,7 @@ SQLite로 통과한 테스트를 PostgreSQL 잠금·JSONB 검증의 대체로 �
 | 예약·일시 중지 | 모의 발송 복구와 멱등성 검증 완료 | 예약 시각·취소·재개·시간대와 상태 전환 |
 | 무발송 통제군 | 무작위 배정·전환 관찰 정의 고정 | 통제군 주문 관찰, ITT 분모, 증분 추정 |
 | 브랜드 문서 RAG | 가이드 수가 늘어 단순 설정으로 관리 곤란 | 문서 적재·버전·검색·출처·검색 품질 평가 |
-| MCP 분리 | 여러 AI 클라이언트가 같은 업무 도구 사용 | 인증된 도구 서버·권한·호환성 테스트 |
+| MCP 분리 | 여러 AI 클라이언트가 같은 업무 도구 사용 | 공개 데모 도구 서버·입출력 계약·호환성 테스트 |
 | 실제 발송 | 모의 전체 흐름 검증 및 채널 요구사항 확정 | provider adapter·webhook·수신 거부·실제 정책 검토 |
 | 다단계 여정·알림 | 단일 캠페인 운영이 안정적 | 트리거·대기·분기·중단·중복 처리 |
 
