@@ -1,1 +1,1 @@
-"""DB engine과 세션을 배치할 패키지. 연결 구현은 단계 1에서 추가한다."""
+"""PostgreSQL engine과 요청별 SQLAlchemy 세션."""
