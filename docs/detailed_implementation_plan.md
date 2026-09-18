@@ -19,7 +19,7 @@
 - `tests/integration/test_api.py`: HTTP 응답, 문서, CORS 테스트.
 - `pyproject.toml`, `.env.example`, `README.md`: 설치 및 실행 기반.
 
-아직 DB, 업무 API, 프런트엔드, AI 연동은 없다. 기존 `app/`를 그대로 확장하고 프런트엔드만 `frontend/`에 추가한다. 패키지 설치로 생성되는 `*.egg-info/`나 `.venv/` 내부는 수정 대상이 아니다.
+단계 1까지 DB 연결, 001~003 마이그레이션, readiness·작업 조회 API와 worker 기반을 추가했다. 고객·캠페인 업무 API, 프런트엔드와 AI 연동은 후속 단계다. 기존 `app/`를 그대로 확장하고 프런트엔드만 `frontend/`에 추가한다. 패키지 설치로 생성되는 `*.egg-info/`나 `.venv/` 내부는 수정 대상이 아니다.
 
 ### 1.2 완성할 사용자 흐름
 
@@ -144,14 +144,16 @@ DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작�
 
 ## 5. 단계 1 — DB와 실행 기반
 
+구현 범위: PostgreSQL Docker Compose, 동기 DB 세션, 001~003 모델·마이그레이션, readiness·작업 조회 API, lease·heartbeat·재시도 worker. 실행 방법과 복구 보장은 [단계 1 실행 안내](phase_1_database_worker.md)에 정리했다. CSV 적재·모의 발송 handler와 004 이후 모델은 해당 후속 단계에서 추가한다.
+
 ### 1-1. PostgreSQL 연결
 
-- [ ] `pyproject.toml`에 SQLAlchemy, Alembic, PostgreSQL 드라이버를 추가하고 설치 버전을 고정한다.
-- [ ] `compose.yaml`에 PostgreSQL, 볼륨, healthcheck를 정의한다.
-- [ ] `.env.example`에 `DATABASE_URL`을 추가한다. 실제 비밀번호를 커밋하지 않는다.
-- [ ] `app/db/session.py`에 engine과 session factory를 작성한다.
-- [ ] `app/api/deps.py`에서 요청 종료 시 세션을 닫고 실패 시 rollback한다.
-- [ ] `/health`는 프로세스 확인으로 유지하고 `/api/v1/ready`에서 DB 연결을 확인한다. DB 장애면 503을 반환한다.
+- [x] `pyproject.toml`에 SQLAlchemy, Alembic, PostgreSQL 드라이버를 추가하고 설치 버전을 고정한다.
+- [x] `compose.yaml`에 PostgreSQL, 볼륨, healthcheck를 정의한다.
+- [x] `.env.example`에 `DATABASE_URL`을 추가한다. 실제 비밀번호를 커밋하지 않는다.
+- [x] `app/db/session.py`에 engine과 session factory를 작성한다.
+- [x] `app/api/deps.py`에서 요청 종료 시 세션을 닫고 실패 시 rollback한다.
+- [x] `/health`는 프로세스 확인으로 유지하고 `/api/v1/ready`에서 DB 연결을 확인한다. DB 장애면 503을 반환한다.
 
 ### 1-2. 모델을 의존 순서대로 추가
 
@@ -176,19 +178,19 @@ DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작�
 
 ### 1-3. 제약과 인덱스
 
-- [ ] FK, NOT NULL, 금액·비율 범위 CHECK를 작성한다.
-- [ ] 이벤트 `(customer_id, event_at)`, 주문 `(customer_id, purchased_at)`, 발송 `(customer_id, sent_at)`, 캠페인 이벤트 `(campaign_id, event_at)`에 인덱스를 둔다.
+- [x] 001~003의 FK, NOT NULL, 금액·수량·상태·작업 진행률 CHECK를 작성한다. 캠페인 비율 제약은 단계 7에서 추가한다.
+- [x] 고객 이벤트 `(customer_id, event_at)`, 주문 `(customer_id, purchased_at)` 인덱스를 추가한다. 발송·캠페인 이벤트 인덱스는 단계 9~10에서 추가한다.
 - [ ] variant 이름은 캠페인 안에서 unique, 실행 결과는 `(run_id, customer_id)` unique로 둔다.
 - [ ] 변형 비율 합계는 서비스 트랜잭션에서 검사한다. 행 하나의 CHECK만으로 합계 검증을 대체하지 않는다.
-- [ ] Alembic upgrade를 빈 DB와 직전 버전 DB에서 검증한다. 운영 데이터에 downgrade를 자동 적용하지 않는다.
+- [x] Alembic upgrade를 빈 DB와 직전 버전 DB에서 검증한다. 운영 데이터에 downgrade를 자동 적용하지 않는다.
 
 ### 1-4. 작업 worker
 
-- [ ] `jobs`에 PENDING/RUNNING/SUCCEEDED/FAILED, payload, attempt, available_at, lease_until, heartbeat를 둔다.
-- [ ] worker가 잠금으로 하나의 작업을 claim하고 주기적으로 lease를 갱신한다.
-- [ ] lease가 만료된 작업만 재처리한다. 작업별 unique 제약으로 재처리를 안전하게 만든다.
-- [ ] 작업 생성은 업무 변경과 같은 트랜잭션에 넣는다. `GET /api/v1/jobs/{id}`로 진행률을 제공한다.
-- [ ] `python -m app.workers.runner` 실행 진입점을 만든다. CSV 파싱·시뮬레이션을 HTTP 프로세스 메모리에만 보관하지 않는다.
+- [x] `jobs`에 PENDING/RUNNING/SUCCEEDED/FAILED, payload, attempt, available_at, lease_until, heartbeat를 둔다.
+- [x] worker가 잠금으로 하나의 작업을 claim하고 주기적으로 lease를 갱신한다.
+- [x] lease가 만료된 작업만 재처리한다. 작업별 unique 제약으로 재처리를 안전하게 만든다.
+- [x] 작업 생성은 업무 변경과 같은 트랜잭션에 넣는다. `GET /api/v1/jobs/{id}`로 진행률을 제공한다.
+- [x] `python -m app.workers.runner` 실행 진입점을 만든다. CSV 파싱·시뮬레이션을 HTTP 프로세스 메모리에만 보관하지 않는다.
 
 **산출물:** DB 설정, 001~003 우선 마이그레이션, readiness API, worker. 004 이후는 해당 업무 단계에서 추가한다.
 

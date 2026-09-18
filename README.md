@@ -10,6 +10,9 @@ Python 3.11 이상을 사용하는 FastAPI 백엔드 기본 프로젝트입니�
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 Copy-Item .env.example .env
+# .env의 POSTGRES_PASSWORD와 DATABASE_URL을 같은 비밀번호로 설정한 뒤:
+docker compose up -d --wait db
+.\.venv\Scripts\python.exe -m alembic upgrade head
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -17,6 +20,7 @@ Copy-Item .env.example .env
 
 - API 정보: http://127.0.0.1:8000/
 - 상태 확인: http://127.0.0.1:8000/api/v1/health
+- DB 연결 확인: http://127.0.0.1:8000/api/v1/ready
 - Swagger UI: http://127.0.0.1:8000/docs
 - ReDoc: http://127.0.0.1:8000/redoc
 - OpenAPI: http://127.0.0.1:8000/openapi.json
@@ -30,6 +34,11 @@ Copy-Item .env.example .env
 | `APP_NAME` | `CRM AI Campaign Automation API` | API 문서 제목 |
 | `ENVIRONMENT` | `development` | 환경 식별값 (동작을 자동 변경하지 않음) |
 | `CORS_ORIGINS` | `[]` | 허용할 프런트엔드 origin의 JSON 배열 |
+| `DATABASE_URL` | 미설정 | PostgreSQL psycopg 연결 URL |
+| `POSTGRES_PASSWORD` | 직접 설정 | 로컬 Docker DB 비밀번호 |
+| `WORKER_LEASE_SECONDS` | `30` | 작업 실행권 만료 시간 |
+| `WORKER_HEARTBEAT_SECONDS` | `10` | 실행권 갱신 간격, lease의 절반 미만 |
+| `WORKER_POLL_SECONDS` | `1` | 실행 가능한 작업이 없을 때 조회 간격 |
 
 프런트엔드 연동 예시: `CORS_ORIGINS=["http://localhost:3000"]`
 
@@ -71,13 +80,13 @@ docs/                     # 요구사항과 상세 계획
 ```
 
 새 API는 `app/api/routes/`에 추가하고 `app/api/router.py`에 등록합니다.
-현재는 공개 데모의 서버 기반과 단계 0 공통 규칙을 포함하며 DB와 캠페인 업무 기능은 아직 구현하지 않았습니다.
-상태 확인 API는 외부 서비스나 DB 연결 상태를 검사하지 않습니다.
+현재는 단계 0 공통 규칙과 단계 1 DB·마이그레이션·worker 기반을 구현했습니다.
+`/api/v1/health`는 프로세스, `/api/v1/ready`는 DB 연결을 검사합니다. readiness는 스키마 최신 여부까지 검사하지 않으므로 배포 시 migration을 별도로 실행합니다.
 
-현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 1~3절과 단계 0입니다.
-DB 연결, AI 호출, worker 실행 기능은 아직 없습니다.
+현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 단계 1까지입니다.
+AI 호출·고객 업로드·캠페인 실행은 후속 단계입니다.
 빈 디렉터리는 `.gitkeep`으로 버전 관리합니다. 프런트엔드 도구 설치는 단계 4에서 진행합니다.
-`compose.yaml`, `Dockerfile`, CI YAML은 해당 구현 단계에서 실행 가능한 설정과 함께 추가합니다.
+PostgreSQL은 `compose.yaml`로, API와 worker는 로컬 `.venv`로 실행합니다. 서버 Dockerfile과 CI는 배포 단계에서 추가합니다.
 
 업무 요청은 `route → service → repository → DB` 순서로 구성합니다.
 서비스가 트랜잭션을 소유하고 repository는 임의로 commit하지 않습니다.
@@ -100,5 +109,31 @@ HTTP와 독립적인 계산 및 검수 규칙은 `domain/`에 배치합니다.
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+기본 실행에서는 `TEST_DATABASE_URL`이 없으면 PostgreSQL 통합 테스트를 건너뜁니다.
+DB가 실행된 상태에서 전체 테스트는 다음과 같이 실행합니다. 설정 DB 이름에 `_test`를 붙인 별도 DB를 생성하고 테스트별 임시 schema만 정리합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.run_db_tests --create
+```
+
+## Worker 실행
+
+API와 별도 터미널에서 실행합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m app.workers.runner
+```
+
+진단 작업 생성 → 한 건 실행 → 상태 조회 예시:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.enqueue_worker_check
+.\.venv\Scripts\python.exe -m app.workers.runner --once
+# 출력된 job_id로 GET /api/v1/jobs/{job_id} 조회
+```
+
+현재 handler는 `system.check`이며 고객 CSV 적재와 모의 발송 handler는 이후 단계에서 추가합니다.
+상세 설정과 복구 방식은 [단계 1 실행 안내](docs/phase_1_database_worker.md)를 참고하세요.
 
 FastAPI 실행 방식은 [공식 서버 실행 문서](https://fastapi.tiangolo.com/deployment/manually/)를 참고했습니다.
