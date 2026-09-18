@@ -1,1 +1,1 @@
-"""백그라운드 작업 처리를 배치한다. 실행 진입점은 단계 1에서 추가한다."""
+"""PostgreSQL lease 기반 worker. python -m app.workers.runner로 실행한다."""
