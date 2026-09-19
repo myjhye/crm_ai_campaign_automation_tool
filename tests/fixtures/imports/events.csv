@@ -1,0 +1,2 @@
+external_id,customer_external_id,event_type,event_at,order_external_id
+e-1,c-1,PURCHASE,2026-09-01T00:00:00+09:00,o-1

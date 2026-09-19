@@ -1,0 +1,2 @@
+external_id,signup_at,status,email_consent,name,email,email_valid
+c-1,2026-01-01T00:00:00+09:00,ACTIVE,true,Demo,demo@example.invalid,true

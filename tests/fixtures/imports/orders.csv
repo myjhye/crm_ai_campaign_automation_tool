@@ -1,0 +1,2 @@
+external_id,customer_external_id,purchased_at,status,amount
+o-1,c-1,2026-09-01T00:00:00+09:00,COMPLETED,300000.00
