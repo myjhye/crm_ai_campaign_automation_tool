@@ -88,8 +88,8 @@ docs/                     # 요구사항과 상세 계획
 현재는 단계 0 공통 규칙, 단계 1 DB·worker, 단계 2 데이터셋·감사 이력, 단계 3 CSV 적재·샘플 생성 백엔드를 구현했습니다.
 `/api/v1/health`는 프로세스, `/api/v1/ready`는 DB 연결을 검사합니다. readiness는 스키마 최신 여부까지 검사하지 않으므로 배포 시 migration을 별도로 실행합니다.
 
-현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 단계 3 백엔드와 단계 4 공통 화면까지입니다.
-데이터셋 선택·생성·이름 변경은 화면에서 사용할 수 있습니다. 고객 지표·캠페인·AI 대화는 후속 단계입니다.
+현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 단계 5 고객·대시보드까지입니다.
+데이터셋 관리, 고객 검색·상세·이벤트, KPI·퍼널·상태 분포를 화면에서 사용할 수 있습니다. 집계 기준·API·RFM·성능 검증은 [단계 5 실행 안내](docs/phase_5_customer_analytics.md)에 정리했습니다. 캠페인·AI 대화는 후속 단계입니다.
 화면 실행에는 Node나 빌드가 필요하지 않습니다. 프런트 테스트는 `npm --prefix frontend ci`, `npm --prefix frontend test`로 실행합니다. 브라우저 테스트와 구현 설명은 [단계 4 실행 안내](docs/phase_4_frontend.md)를 참고하세요.
 PostgreSQL은 `compose.yaml`로, API와 worker는 로컬 `.venv`로 실행합니다. 서버 Dockerfile과 CI는 배포 단계에서 추가합니다.
 

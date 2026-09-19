@@ -46,8 +46,15 @@ ReportingPeriod는 `[from,to)`이며 `from < to`여야 한다. JSON 직렬화 �
 구현 파일: `app/schemas/common.py`, `app/core/errors.py`, `app/core/time.py`, `app/api/deps.py`.
 오류 처리 구현은 [FastAPI 공식 오류 처리 문서](https://fastapi.tiangolo.com/tutorial/handling-errors/)를 따른다. Decimal·timezone 검증은 [Pydantic 표준 타입 문서](https://docs.pydantic.dev/latest/api/standard_library_types/)를 참고했다.
 
+## 단계 5 고객·대시보드 요청
+
+단계 5의 고객·대시보드 API는 `dataset_id`, timezone 포함 `from`, `to`를 필수 query로 받는다. 고객 검색·정렬·기간 활동 필터와 데이터 버전 일관성 계약은 [단계 5 실행 안내](phase_5_customer_analytics.md)를 따른다. 고객 응답의 금액은 문자열, 지표 비율은 숫자 또는 null이며 CRM 기여 매출·발송 이력·소속 세그먼트의 미구현 상태를 별도로 구분한다.
+
 ## 단계 3 CSV 요청
 
 CSV 미리보기는 JSON 대신 `Content-Type: text/csv`의 원본 body를 받는다. `dataset_id`, timezone이 있는 `reference_at`, `mode=insert|upsert`는 query다. 이후 응답·확정·조회는 JSON 계약을 유지한다. 배치 식별자는 `import_batch_id`, 작업 식별자는 `job_id`다.
 
 `POST /api/v1/data/import/{kind}/preview` → `POST /api/v1/data/import/{import_batch_id}/commit` → `GET /api/v1/data/import/{import_batch_id}`로 진행한다. 확정 응답은 202이며 최종 성공 여부는 배치 status로 확인한다. 종류별 CSV 필드와 전체 요청 예시는 [단계 3 실행 안내](phase_3_data_import.md)에 정의했다.
+# 공개 데이터셋 선택 보완
+
+`GET /api/v1/datasets`는 `purpose=ANALYSIS`만 반환하며 전체 고객 원천이 존재하는 데이터셋을 우선 정렬한 뒤 페이지네이션한다. SYSTEM의 상세·수정은 404다. 데이터셋 응답의 `customer_count`, `order_count`, `event_count`는 기간과 무관한 전체 원천 건수이며 모두 0일 수 있다. 상세 규칙은 [공개 데모 데이터셋 선택](dataset_entry_experience.md)을 따른다.
