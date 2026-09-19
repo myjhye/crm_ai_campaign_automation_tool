@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.dialects.postgresql import insert
 
 from app.models.datasets import AuditLog
+from app.services.imports import import_job
 
 
 class CheckPayload(BaseModel):
@@ -24,4 +25,4 @@ def system_check(session, job):
     return {"message": "worker check completed"}
 
 
-HANDLERS = {"system.check": system_check}
+HANDLERS = {"system.check": system_check, "data.import": import_job}
