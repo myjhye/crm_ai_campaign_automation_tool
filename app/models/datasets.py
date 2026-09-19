@@ -10,6 +10,7 @@ from app.db.base import Base, IdentityMixin
 
 class Dataset(IdentityMixin, Base):
     __tablename__ = "datasets"
+    reference_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     name: Mapped[str] = mapped_column(String(200))
     source: Mapped[str] = mapped_column(String(20), default="DEMO", server_default="DEMO")
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")

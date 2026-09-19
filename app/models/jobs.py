@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKeyConstraint, Integer, String, UniqueConstraint, Index, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKeyConstraint, Integer, LargeBinary, String, UniqueConstraint, Index, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,6 +41,9 @@ class Job(IdentityMixin, DatasetMixin, Base):
 class ImportBatch(IdentityMixin, DatasetMixin, Base):
     __tablename__ = "import_batches"
     kind: Mapped[str] = mapped_column(String(50))
+    content: Mapped[bytes | None] = mapped_column(LargeBinary)
+    options: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     file_hash: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(20), default="PREVIEW", server_default="PREVIEW")
     job_id: Mapped[UUID | None]

@@ -24,3 +24,4 @@ class DatasetResponse(BaseModel):
     version: int
     created_at: datetime
     updated_at: datetime
+    reference_at: datetime | None = None
