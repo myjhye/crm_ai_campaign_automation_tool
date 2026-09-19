@@ -1,4 +1,5 @@
 import {renderSegments} from '../features/segments/index.js';
+import {renderAI} from '../features/ai/index.js';
 import {renderDashboard} from '../features/dashboard/index.js';
 import {renderCustomers} from '../features/customers/index.js';
 import {datasets} from '../api/client.js';
@@ -25,6 +26,7 @@ function refresh(dataset) {
 }
 
 async function render(route) {
+  content.classList.toggle('ai-page', route.view === 'ai');
   currentRequest?.abort();
   currentRequest = new AbortController();
   const {signal} = currentRequest;
@@ -42,7 +44,7 @@ async function render(route) {
   document.title = `${title} · GrowthPilot`;
   document.getElementById('breadcrumb').textContent = title;
   document.getElementById('navigation').replaceChildren(...pages.map(([id, label, icon]) =>
-    el('a', {className: 'nav-link', href: routeHash({...route, view: id, resource: '', page: 1, q: ''}), 'aria-current': route.view === id ? 'page' : null},
+    el('a', {id: id === 'ai' ? 'ai-page-link' : null, className: 'nav-link', href: routeHash({...route, view: id, resource: '', page: 1, q: ''}), 'aria-current': route.view === id ? 'page' : null},
       el('span', {className: 'nav-icon', 'aria-hidden': 'true', text: icon}), el('span', {text: label}))));
   try {
     if (route.issues.length) {
@@ -63,9 +65,9 @@ async function render(route) {
     if (selected && !page.items.some(row => row.id === selected.id)) selector.append(el('option', {value: selected.id, text: selected.name}));
     selector.value = selected?.id || '';
     store.set({selectedDataset: selected});
-    document.getElementById('ai-context').textContent = selected ? `선택 데이터: ${selected.name}` : '데이터셋을 선택해주세요.';
     if (page.total > 100) filterMessage.textContent += ' · 선택 목록은 첫 100개, 전체는 Data 메뉴에서 확인';
-    if (route.view === 'customers' && selected) await renderCustomers(content, route, signal);
+    if (route.view === 'ai') renderAI(content, signal);
+    else if (route.view === 'customers' && selected) await renderCustomers(content, route, signal);
     else if (route.view === 'segments' && selected) await renderSegments(content, route, signal);
     else if (route.resource) content.replaceChildren(heading(title, `리소스 ${route.resource}`), stateCard('상세 화면 준비 중', '주소의 리소스 ID는 유지됩니다. 이 업무의 상세 조회 API가 연결되면 내용을 표시합니다.', button('목록으로', () => navigate({resource: ''}), signal)));
     else if (route.view === 'overview' && selected) await renderDashboard(content, route, selected, signal);
@@ -91,7 +93,6 @@ async function render(route) {
     content.replaceChildren(stateCard('데이터를 불러오지 못했습니다', errorMessage(error),
       el('div', {className: 'row', style: 'justify-content:center'}, button('다시 시도', () => refresh(route.dataset), signal),
         error.status === 404 ? button('데이터셋 다시 선택', () => navigate({dataset: '', resource: ''}, {replace: true}), signal) : null), true));
-    document.getElementById('ai-context').textContent = '데이터 연결 상태를 확인해주세요.';
     hasRenderedContent = true;
   } finally {
     if (!signal.aborted) {
@@ -111,11 +112,6 @@ document.getElementById('period-form').addEventListener('submit', event => {
   navigate({from: fromInput.value, to: toInput.value, page: 1});
 });
 for (const input of [fromInput, toInput]) input.addEventListener('input', () => toInput.setCustomValidity(''));
-const toggle = document.getElementById('ai-toggle');
-toggle.addEventListener('click', () => {
-  const closed = document.getElementById('workspace').classList.toggle('ai-closed');
-  toggle.setAttribute('aria-expanded', String(!closed)); document.getElementById('ai-panel').hidden = closed;
-});
 startRouter(render);
 window.addEventListener('pagehide', () => {currentRequest?.abort();});
 window.addEventListener('pageshow', event => {if (event.persisted) window.dispatchEvent(new Event('hashchange'));});

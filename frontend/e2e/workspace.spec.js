@@ -97,13 +97,8 @@ test('connection errors recover and the panel does not overlap content at 1280px
   await page.getByRole('button', {name: '다시 시도'}).click();
   await expect(page.getByRole('heading', {name: 'Seed demo', exact: true})).toBeVisible();
   await expect(page.locator('#ai-panel')).toBeHidden();
-  await page.locator('#ai-toggle').click();
-  const main = await page.locator('#content').boundingBox(); const panel = await page.locator('#ai-panel').boundingBox();
-  expect(main.x + main.width).toBeLessThanOrEqual(panel.x + 1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({path: 'test-results/overview-1280.png', fullPage: true});
-  await page.getByRole('button', {name: 'AI 어시스턴트'}).click();
-  await expect(page.locator('#ai-panel')).toBeHidden();
+  await expect(page.locator('#ai-toggle')).toHaveCount(0);
+  await expect(page.locator('#ai-page-link')).toBeVisible();
   await page.setViewportSize({width: 390, height: 844});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({path: 'test-results/overview-mobile.png', fullPage: true});

@@ -4,6 +4,7 @@ export const pages = [
   ['overview', 'Overview', '◫'], ['customers', 'Customers', '♧'], ['segments', 'Segments', '◇'],
   ['campaigns', 'Campaigns', '↗'], ['experiments', 'Experiments', '⚗'], ['reports', 'Reports', '▤'],
   ['data', 'Data & Integrations', '▦'], ['settings', 'Settings', '⚙'],
+  ['ai', 'AI 어시스턴트', '✦'],
 ];
 export function validDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value < '1900-01-01' || value > '9998-12-31') return false;
