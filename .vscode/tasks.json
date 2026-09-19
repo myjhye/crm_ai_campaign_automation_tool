@@ -1,0 +1,24 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "GrowthPilot: 서버와 화면 실행",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/start-dev.ps1"],
+      "options": {"cwd": "${workspaceFolder}"},
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "growthpilot",
+        "pattern": {"regexp": "^(.*):(\\d+): (.*)$", "file": 1, "line": 2, "message": 3},
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Starting PostgreSQL|Applying database migrations",
+          "endsPattern": "Application startup complete"
+        }
+      },
+      "presentation": {"reveal": "always", "panel": "dedicated", "focus": true, "clear": true},
+      "runOptions": {"instanceLimit": 1}
+    }
+  ]
+}
