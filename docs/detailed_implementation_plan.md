@@ -19,7 +19,7 @@
 - `tests/integration/test_api.py`: HTTP 응답, 문서, CORS 테스트.
 - `pyproject.toml`, `.env.example`, `README.md`: 설치 및 실행 기반.
 
-단계 1까지 DB 연결, 001~003 마이그레이션, readiness·작업 조회 API와 worker 기반을 추가했다. 고객·캠페인 업무 API, 프런트엔드와 AI 연동은 후속 단계다. 기존 `app/`를 그대로 확장하고 프런트엔드만 `frontend/`에 추가한다. 패키지 설치로 생성되는 `*.egg-info/`나 `.venv/` 내부는 수정 대상이 아니다.
+단계 3까지 DB·worker, 공개 데이터셋·감사 이력, CSV 미리보기·확정 적재와 합성 샘플 생성기를 추가했다. 최신 마이그레이션은 `003b`다. 고객 조회·캠페인 업무 API, 프런트엔드와 AI 연동은 후속 단계다. 기존 `app/`를 그대로 확장하고 프런트엔드만 `frontend/`에 추가한다. 패키지 설치로 생성되는 `*.egg-info/`나 `.venv/` 내부는 수정 대상이 아니다.
 
 ### 1.2 완성할 사용자 흐름
 
@@ -212,7 +212,7 @@ DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작�
 - [ ] 샘플 데이터가 준비된 상태로 공개하고, 업로드 화면에는 즉시 사용할 수 있는 합성 CSV 예제를 제공한다.
 - [ ] 같은 데이터에서 여러 방문자가 작업할 수 있다는 점을 화면에 표시한다.
 - [x] 데이터셋 이름의 동시 수정은 version 검사로 409를 반환하고 상세 API에서 최신 상태를 조회한다. 화면과 다른 업무 리소스의 version 검사는 해당 단계에서 연결한다.
-- [ ] 준비된 샘플을 다시 불러오는 작업은 새로운 dataset을 생성한다. 진행 중인 작업의 dataset을 덮어쓰지 않는다.
+- [x] 단계 3의 샘플 생성기에 새 `--dataset-key`를 주면 새로운 dataset을 생성한다. 같은 키 재실행은 기존 dataset을 유지하며 방문자의 편집을 덮어쓰지 않는다. 화면 연결은 후속 단계다.
 - [ ] 페이지 새로고침 시 URL의 dataset과 리소스 ID로 작업 화면을 복원한다. dataset은 데이터 선택값이며 접근 제한 수단으로 사용하지 않는다.
 
 ### 2-3. 감사 이벤트
@@ -226,6 +226,8 @@ DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작�
 
 ## 7. 단계 3 — 데이터 업로드와 샘플 데이터
 
+구현 완료: 5종 CSV 검증·미리보기·worker 확정 적재, 고객 원천 집계, 데이터 버전·감사 이력, 합성 샘플 생성·대조·보관 정리. 처리 흐름과 실행 예시는 [단계 3 실행 안내](phase_3_data_import.md)를 참고한다. 화면·캠페인 성과 CSV·노출 초과 발송 이력은 관련 후속 단계에 연결한다.
+
 ### 3-1. CSV 계약과 적재 순서
 
 적재 순서: 고객 → 상품 → 주문 및 주문 항목 → 행동 이벤트 → 캠페인 성과 이벤트.
@@ -237,29 +239,31 @@ DB 접근은 SQLAlchemy 동기 세션을 기본안으로 한다. 동기 DB 작�
 | orders.csv | external_id, customer_external_id, purchased_at, status, amount | external_id |
 | order_items.csv | order_external_id, line_id, product_external_id, quantity, amount | 주문+line_id |
 | events.csv | external_id, customer_external_id, event_type, event_at | external_id |
-| campaign_events.csv | external_id, delivery_id, event_type, event_at | external_id |
+| campaign_events.csv (단계 9~10) | external_id, delivery_id, event_type, event_at | external_id |
 
 연락처·이벤트별 properties는 별도 스키마로 검증한다. CSV 템플릿과 정상/오류 샘플을 `tests/fixtures/imports/`에 둔다.
 
 ### 3-2. 미리보기 → 확정 적재
 
-- [ ] `POST /data/import/{kind}/preview`에서 파일을 검증하고 `import_batch_id`, 오류 행, 예상 생성·변경·중복 건수를 반환한다.
-- [ ] CSV는 UTF-8/UTF-8 BOM을 지원하고 기본 제한은 파일 20MB·20만 행으로 둔다. 초과는 업로드 시 차단한다.
-- [ ] 필수 컬럼, 타입, 존재하지 않는 FK, 음수 금액, 날짜 timezone을 확인한다. 행 번호는 헤더 포함 여부를 문서화한다.
-- [ ] MVP는 오류가 하나라도 있으면 확정 불가로 한다. 부분 성공 모드를 암묵적으로 만들지 않는다.
-- [ ] `POST /data/import/{batch_id}/commit`은 202와 job_id를 반환한다. 미리보기 이후 파일 내용을 바꾸어 제출할 수 없도록 파일 hash를 묶는다.
-- [ ] 임시 적재 후 하나의 병합 트랜잭션으로 반영하고 `dataset_versions`를 증가시킨다.
-- [ ] 같은 외부 ID·같은 내용은 no-op, 같은 ID·변경 내용은 명시적 upsert 모드에서만 갱신한다. 이벤트 내용 변경은 기본 차단한다.
-- [ ] 임시 파일은 임의 이름으로 저장하고 완료·실패 후 보관 기한에 따라 정리한다.
+- [x] `POST /api/v1/data/import/{kind}/preview`에서 `text/csv` 원본을 검증하고 `import_batch_id`, 오류 행, 예상 생성·변경·중복 건수를 반환한다.
+- [x] CSV는 UTF-8/UTF-8 BOM을 지원하며 파일 20 MiB·데이터 레코드 20만 개를 초과하면 업로드 시 차단한다.
+- [x] 필수 컬럼, 타입, 같은 dataset 안의 FK, 음수 금액, 날짜 timezone을 확인한다. 헤더는 1번, 첫 데이터 레코드는 2번으로 센다.
+- [x] 오류가 하나라도 있으면 확정 불가로 한다. 오류 상세는 최대 100개와 전체 오류 수를 반환한다.
+- [x] `POST /api/v1/data/import/{batch_id}/commit`은 202와 job_id를 반환한다. 보관 원본의 SHA-256을 job에 묶고 worker에서 다시 확인한다.
+- [x] worker에서 최신 상태를 재검증한 후 하나의 병합 트랜잭션으로 반영한다. 실제 변경이 있을 때만 `dataset_versions`를 증가시키고 감사 이력을 기록한다.
+- [x] 같은 외부 ID·같은 내용은 no-op, 변경 내용은 명시적 upsert에서만 갱신한다. 이벤트 수정과 주문의 고객·구매 시각 변경은 차단한다.
+- [x] UUID 배치에 원본 bytes를 PostgreSQL `bytea`로 보관한다. 공유 임시 폴더 대신 DB를 사용하며 7일 경과 후 정리 명령으로 제거한다. 대기·실행 중인 작업의 원본은 보존한다.
+- [x] 첫 적재의 dataset `reference_at`을 고정하고 모든 적재에 같은 시점을 요구한다. 원천 주문에서 영향받은 고객 캐시를 갱신하며, 별도 대조·복구 명령을 제공한다.
 
 ### 3-3. 샘플 생성기
 
-- [ ] `scripts/seed_demo.py`에 `--seed`, `--reference-at`, `--size small|demo` 옵션을 둔다.
-- [ ] small은 고객 100명 수준의 빠른 테스트, demo는 원문의 고객 1만·주문 3만·행동 이벤트 20만 규모로 만든다.
-- [ ] VIP 휴면·장바구니 이탈·미동의·탈퇴·hard bounce·노출 초과 고객을 구분 가능한 고정 그룹으로 생성한다.
-- [ ] 모바일 이탈 시나리오는 device_type, landing_view, 구매 연결 데이터까지 생성한다. 데이터가 없으면 해당 원인 분석을 표시하지 않는다.
-- [ ] 원천 테이블에서 고객 집계값을 계산한다. 샘플 집계값을 별도로 임의 입력하지 않는다.
-- [ ] 재실행은 seed dataset 키로 중복을 방지한다. DB 전체 삭제를 기본 동작으로 사용하지 않는다.
+- [x] `scripts/seed_demo.py`에 `--seed`, `--reference-at`, `--size small|demo`, 새 복사본용 `--dataset-key`를 제공한다.
+- [x] small은 고객 100·주문 300·이벤트 2,000건, demo는 고객 1만·주문 3만·이벤트 20만 건을 생성한다. 이벤트 수는 주문 연결 PURCHASE를 포함한다.
+- [x] VIP 휴면·장바구니 이탈·미동의·탈퇴·hard bounce·연락처 없음·미구매 등 고정 그룹을 생성한다.
+- [ ] 노출 초과 그룹의 실제 발송 원천 이력은 campaign_deliveries가 추가되는 단계 9에서 생성한다.
+- [x] `device_type`, `LANDING_VIEW`, 주문 연결 PURCHASE를 생성한다. 모바일 이탈 그룹에는 구매를 만들지 않는다. 분석·화면 표시는 후속 단계다.
+- [x] 원천 주문에서 고객 집계값을 계산한다. 샘플 집계값을 임의 입력하지 않는다.
+- [x] 생성기 버전·seed·기준 시점·크기·dataset key로 중복을 방지한다. 재실행은 기존 데이터를 덮어쓰거나 DB를 삭제하지 않는다.
 
 **완료 기준:** 같은 seed와 기준 시점이면 같은 지표가 나온다. 동일 파일 재업로드가 숫자를 늘리지 않는다. 오류 CSV는 업무 데이터에 반영되지 않는다.
 

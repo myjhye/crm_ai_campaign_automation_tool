@@ -53,3 +53,5 @@
 ## 검증 근거
 
 `tests/unit/test_phase_zero.py`에서 29/30/59/60일, 미구매·탈퇴, timezone, 자정, 미래 구매 오류, 빈 목록, 0 분모와 금액 문자열을 검증한다. 원천 쿼리·중복 이벤트·매출 귀속 통합 테스트는 단계 3·5·10에서 추가한다.
+
+단계 3에서는 데이터셋의 첫 적재 `reference_at`을 고정하고 그 시점 이하의 COMPLETED 주문에서 고객 캐시를 계산한다. 취소·전액 환불·미래 주문은 제외하며 PURCHASE 이벤트는 구매 합계에 다시 더하지 않는다. CSV의 ACTIVE/CHURN_RISK/DORMANT 값은 캐시를 덮어쓰지 않는다. `tests/integration/test_imports.py`에서 중복·환불·미래 주문·원천 대조를 검증한다. 선택 기간별 대시보드 집계와 캠페인 귀속은 후속 단계다.

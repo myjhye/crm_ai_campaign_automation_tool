@@ -80,11 +80,11 @@ docs/                     # 요구사항과 상세 계획
 ```
 
 새 API는 `app/api/routes/`에 추가하고 `app/api/router.py`에 등록합니다.
-현재는 단계 0 공통 규칙, 단계 1 DB·worker, 단계 2 데이터셋·감사 이력 백엔드를 구현했습니다.
+현재는 단계 0 공통 규칙, 단계 1 DB·worker, 단계 2 데이터셋·감사 이력, 단계 3 CSV 적재·샘플 생성 백엔드를 구현했습니다.
 `/api/v1/health`는 프로세스, `/api/v1/ready`는 DB 연결을 검사합니다. readiness는 스키마 최신 여부까지 검사하지 않으므로 배포 시 migration을 별도로 실행합니다.
 
-현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 단계 2 백엔드 기반까지입니다.
-AI 호출·고객 업로드·캠페인 실행은 후속 단계입니다.
+현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 단계 3 백엔드까지입니다.
+화면·AI 호출·캠페인 실행은 후속 단계입니다.
 빈 디렉터리는 `.gitkeep`으로 버전 관리합니다. 프런트엔드 도구 설치는 단계 4에서 진행합니다.
 PostgreSQL은 `compose.yaml`로, API와 worker는 로컬 `.venv`로 실행합니다. 서버 Dockerfile과 CI는 배포 단계에서 추가합니다.
 
@@ -133,7 +133,7 @@ API와 별도 터미널에서 실행합니다.
 # 출력된 job_id로 GET /api/v1/jobs/{job_id} 조회
 ```
 
-현재 handler는 `system.check`이며 고객 CSV 적재와 모의 발송 handler는 이후 단계에서 추가합니다.
+현재 handler는 `system.check`와 CSV 적재용 `data.import`입니다. 모의 발송 handler는 이후 단계에서 추가합니다.
 상세 설정과 복구 방식은 [단계 1 실행 안내](docs/phase_1_database_worker.md)를 참고하세요.
 
 ## 공개 데이터셋·감사 이력 API
@@ -141,6 +141,19 @@ API와 별도 터미널에서 실행합니다.
 `alembic upgrade head`로 `003a`를 적용하면 `/api/v1/datasets`에서 빈 데이터셋 생성·조회,
 `PUT /api/v1/datasets/{id}`에서 version 기반 이름 변경을 사용할 수 있습니다.
 `GET /api/v1/audit-logs`에서 변경 이력을 조회합니다. 로그인은 필요하지 않습니다.
-샘플 데이터와 화면은 후속 단계이며, 입력 예시와 충돌 처리는 [단계 2 실행 안내](docs/phase_2_demo_audit.md)에 정리했습니다.
+데이터셋 입력 예시와 충돌 처리는 [단계 2 실행 안내](docs/phase_2_demo_audit.md)에 정리했습니다. 화면은 후속 단계입니다.
+
+## CSV 적재·샘플 데이터
+
+최신 `003b` 마이그레이션을 적용한 후 합성 데이터를 생성할 수 있습니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m scripts.seed_demo --seed 42 --reference-at "2026-09-19T00:00:00Z" --size small
+```
+
+`--size demo`는 고객 1만 명·주문 3만 건·이벤트 20만 건을 생성합니다. 같은 옵션 재실행은 기존 데이터를 유지합니다. `--dataset-key fresh-1`을 추가하면 새 복사본을 만듭니다.
+
+CSV는 `/api/v1/data/import/{kind}/preview`에 `text/csv`로 전송하고, 반환된 배치를 `/commit`으로 확정합니다. 실행 중인 worker가 있어야 적재가 완료됩니다. CSV 예제·PowerShell 요청·중복 처리·원천 대조·보관 정리는 [단계 3 실행 안내](docs/phase_3_data_import.md)에 정리했습니다.
 
 FastAPI 실행 방식은 [공식 서버 실행 문서](https://fastapi.tiangolo.com/deployment/manually/)를 참고했습니다.
