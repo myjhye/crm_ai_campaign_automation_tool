@@ -28,33 +28,6 @@ from app.workers.runner import run_once
 pytestmark = pytest.mark.postgres
 
 
-@pytest.fixture
-def raw_database():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("Set TEST_DATABASE_URL to a dedicated PostgreSQL *_test database")
-    if not (make_url(url).database or "").endswith("_test"):
-        pytest.fail("Refusing to run DB tests outside a *_test database")
-    db = Database(url)
-    schema = "test_" + uuid4().hex
-    with db.engine.begin() as connection:
-        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-    db.dispose()
-
-    @event.listens_for(db.engine, "connect")
-    def select_schema(connection, record):
-        with connection.cursor() as cursor:
-            cursor.execute(f'SET search_path TO "{schema}"')
-        connection.commit()
-
-    db.test_schema = schema
-    try:
-        yield db
-    finally:
-        with db.engine.begin() as connection:
-            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-        db.dispose()
-
 
 def migrate(db, revision):
     config = Config("alembic.ini")
@@ -62,11 +35,6 @@ def migrate(db, revision):
         config.attributes["connection"] = connection
         command.upgrade(config, revision)
 
-
-@pytest.fixture
-def database(raw_database):
-    migrate(raw_database, "head")
-    return raw_database
 
 
 def add_dataset(db):
@@ -93,7 +61,9 @@ def expire(db, job):
 def test_migrations_empty_and_incremental(raw_database):
     migrate(raw_database, "001")
     assert set(inspect(raw_database.engine).get_table_names()) == {"alembic_version", "datasets", "audit_logs"}
-    dataset_id = add_dataset(raw_database)
+    dataset_id = uuid4()
+    with raw_database.engine.begin() as connection:
+        connection.execute(text("INSERT INTO datasets (id,name,source) VALUES (:id,'Integration fixture','DEMO')"), {"id": dataset_id})
     migrate(raw_database, "002")
     assert "orders" in inspect(raw_database.engine).get_table_names()
     migrate(raw_database, "head")
