@@ -219,3 +219,22 @@ def test_metric_check_and_repair(client, database, dataset_id):
         assert check_metrics(session, UUID(dataset_id), apply=True) == 1
     with database.sessions() as session:
         assert session.scalar(select(Customer)).total_purchase_amount == Decimal("300000.00")
+
+
+def test_name_backfill_preserves_edits_and_is_idempotent(database):
+    from scripts.backfill_demo_names import backfill
+    with database.sessions.begin() as session:
+        dataset, _ = seed_demo(session, seed=42, reference_at=REFERENCE)
+        rows = session.scalars(select(Customer).where(Customer.dataset_id == dataset.id).order_by(Customer.external_id)).all()
+        rows[0].name = "dormant_vip-0"
+        rows[1].name = "Visitor edited"
+        rows[2].name = None
+        session.flush()
+        assert backfill(session, dataset.id) == 2
+        assert rows[0].name == "dormant_vip-0"
+        assert backfill(session, dataset.id, apply=True) == 2
+        session.flush()
+        assert backfill(session, dataset.id, apply=True) == 0
+        assert rows[1].name == "Visitor edited"
+        with pytest.raises(ValueError):
+            backfill(session, dataset.id, seed=43)

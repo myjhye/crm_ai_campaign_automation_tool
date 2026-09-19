@@ -1,6 +1,7 @@
 """Deterministic synthetic source data; never delete or replace a dataset."""
 import argparse
 import hashlib
+from scripts.data.korean_names import synthetic_name
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import NAMESPACE_URL, uuid5
@@ -28,7 +29,7 @@ def source_rows(seed, reference_at, size):
     customers = []
     for i in range(count):
         group = i % 10
-        customers.append(dict(external_id=f"customer-{i}", name=f"{GROUPS[group]}-{i}",
+        customers.append(dict(external_id=f"customer-{i}", name=synthetic_name(f"customer-{i}", seed),
             signup_at=reference_at - timedelta(days=365),
             status="WITHDRAWN" if group == 3 else "ACTIVE", email_consent=group != 2,
             withdrawn_at=reference_at - timedelta(days=2) if group == 3 else None,
