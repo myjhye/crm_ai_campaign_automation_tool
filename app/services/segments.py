@@ -1,5 +1,6 @@
 import hashlib
 import json
+from contextlib import nullcontext
 from decimal import Decimal
 from datetime import datetime, timezone
 from app.core.errors import AppError
@@ -66,8 +67,8 @@ def list_segments(session, query):
     return {'items': [representation(segment, revision) for segment, revision in rows], 'total': total, 'page': query.page, 'page_size': query.page_size}
 
 
-def save(session, request, request_id, segment_id=None):
-    with session.begin():
+def save(session, request, request_id, segment_id=None, *, managed_transaction=False, created_source='VISITOR'):
+    with nullcontext() if managed_transaction else session.begin():
         result = preview(session, request)
         if segment_id is None:
             segment = Segment(dataset_id=request.dataset_id, name=request.name)
@@ -81,7 +82,7 @@ def save(session, request, request_id, segment_id=None):
             segment.version += 1
             segment.name = request.name
         revision = SegmentRevision(dataset_id=request.dataset_id, segment_id=segment.id, version=segment.version, name=segment.name,
-            condition_json=request.condition.canonical(), reference_at=request.reference_at, data_version=result['data_version'], condition_hash=result['condition_hash'], created_source='VISITOR')
+            condition_json=request.condition.canonical(), reference_at=request.reference_at, data_version=result['data_version'], condition_hash=result['condition_hash'], created_source=created_source)
         session.add(revision); session.flush()
         record_change(session, dataset_id=request.dataset_id, resource_id=segment.id, actor_type='VISITOR', action='SEGMENT_CREATED' if previous is None else 'SEGMENT_UPDATED', request_id=request_id, previous_version=previous, new_version=segment.version)
         return representation(segment, revision)
