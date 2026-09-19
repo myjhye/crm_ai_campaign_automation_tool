@@ -106,7 +106,7 @@ test('dashboard drilldown and customer profile preserve filters on reload', asyn
   await mockAPI(page); await page.goto('/');
   await page.getByRole('button', {name: '휴면', exact: true}).click();
   await expect(page).toHaveURL(/status=DORMANT/);
-  await expect(page.getByLabel('고객 상태')).toHaveValue('DORMANT');
+  await expect(page.getByRole('combobox', {name: '고객 상태', exact: true})).toHaveValue('DORMANT');
   await page.getByLabel('고객 검색').fill('alice');
   await page.getByRole('button', {name: '고객 조회', exact: true}).click();
   await page.reload(); await expect(page.getByLabel('고객 검색')).toHaveValue('alice');
@@ -136,4 +136,16 @@ test('Overview renders four KPIs and proportional bars, including zero', async (
   expect(widths[2] / widths[0]).toBeCloseTo(0.5, 2);
   expect(widths[3] / widths[0]).toBeCloseTo(0.25, 2);
   await expect(chart.locator('.bar-number')).toHaveText(['100', '0', '50', '25']);
+});
+test('customer identity, status and sorting controls are clear', async ({page}) => {
+  await mockAPI(page); await page.goto('/#/customers');
+  await expect(page.locator('.customer-name')).toHaveText('Demo customer');
+  await expect(page.locator('.customer-external')).toHaveCount(0);
+  await expect(page.locator('.customers-table')).not.toContainText('customer-1');
+  await expect(page.locator('.customer-status.status-ACTIVE')).toHaveText('활성');
+  await expect(page.locator('#content')).not.toContainText('데이터 버전');
+  await page.getByLabel('정렬 방향').selectOption('asc');
+  const request = page.waitForRequest(request => request.url().includes('/customers?') && request.url().includes('direction=asc'));
+  await page.getByRole('button', {name: '고객 조회', exact: true}).click();
+  expect((await request).url()).toContain('sort=signup_at');
 });

@@ -4,7 +4,7 @@ import {navigate, routeHash} from '../../app/router.js';
 import {statusNames, formatMoney} from '../dashboard/index.js';
 
 function select(name, entries, value) {
-  const node = el('select', {name}, ...entries.map(([id, label]) => el('option', {value: id, text: label}))); node.value = value; return node;
+  const node = el('select', {name, className: name === 'status' ? `status-filter status-${value}` : ''}, ...entries.map(([id, label]) => el('option', {value: id, text: label, className: name === 'status' ? `status-${id}` : ''}))); node.value = value; return node;
 }
 function pagination(route, total, pageSize, signal) {
   const previous = button('이전', () => navigate({page: route.page - 1}), signal);
@@ -14,25 +14,31 @@ function pagination(route, total, pageSize, signal) {
 }
 export async function renderCustomers(root, route, signal) {
   if (route.resource) return renderDetail(root, route, signal);
-  const result = await analytics.customers(route, signal); if (signal.aborted) return;
+  const result = await analytics.customers(route, signal);
+  const filtered = Boolean(route.q || route.status || route.signup_from || route.signup_to || (route.cohort && route.cohort !== 'all'));
+  const all = filtered ? await analytics.customers({...route, q: '', status: '', signup_from: '', signup_to: '', cohort: 'all', page: 1}, signal) : result;
+  if (signal.aborted) return;
   const search = el('input', {name: 'q', type: 'search', value: route.q, maxlength: '200', placeholder: '이름·이메일·외부 ID'});
   const form = el('form', {className: 'toolbar'},
     el('label', {text: '고객 검색'}, search),
     el('label', {text: '고객 상태'}, select('status', [['', '모든 상태'], ...Object.entries(statusNames)], route.status || '')),
-    el('label', {text: '기간 활동'}, select('cohort', [['all', '전체'], ['new', '신규 가입'], ['active', '활성 고객'], ['purchased', '구매 고객'], ['repeat', '재구매 고객'], ['view', '퍼널: 조회'], ['cart', '퍼널: 장바구니'], ['purchase', '퍼널: 구매']], route.cohort || 'all')),
+    el('label', {text: '선택 기간의 고객 활동', title: '활성 고객은 선택 기간에 조회·장바구니·구매 행동이 있는 고객입니다.'}, select('cohort', [['all', '전체'], ['new', '신규 가입'], ['active', '활성 고객'], ['purchased', '구매 고객'], ['repeat', '재구매 고객'], ['view', '퍼널: 조회'], ['cart', '퍼널: 장바구니'], ['purchase', '퍼널: 구매']], route.cohort || 'all')),
     el('label', {text: '가입 시작일'}, el('input', {type: 'date', name: 'signup_from', value: route.signup_from || ''})),
     el('label', {text: '가입 종료일'}, el('input', {type: 'date', name: 'signup_to', value: route.signup_to || ''})),
     el('label', {text: '정렬 기준'}, select('sort', [['signup_at', '가입일'], ['name', '이름'], ['total_purchase_amount', '구매 합계'], ['order_count', '주문 수']], route.sort || 'signup_at')),
     el('label', {text: '정렬 방향'}, select('direction', [['desc', '내림차순'], ['asc', '오름차순']], route.direction || 'desc')),
     el('button', {className: 'button', type: 'submit', text: '고객 조회'}));
   form.addEventListener('submit', event => {event.preventDefault(); navigate({...Object.fromEntries(new FormData(form)), page: 1});}, {signal});
-  const table = el('table', {}, el('thead', {}, el('tr', {}, ...['고객', '이메일', '상태', '구매 합계', '주문 수', '최근 구매'].map(text => el('th', {scope: 'col', text})))),
+  const table = el('table', {className: 'customers-table'}, el('thead', {}, el('tr', {}, ...['이름', '상태', '이메일', '구매 합계', '주문 수', '최근 구매'].map(text => el('th', {scope: 'col', text})))),
     el('tbody', {}, ...result.items.map(row => el('tr', {},
-      el('td', {}, el('a', {href: routeHash({...route, resource: row.id, page: 1}), text: row.name || row.external_id})),
-      el('td', {text: row.email || '없음'}), el('td', {text: statusNames[row.status]}),
+      el('td', {}, el('a', {className: 'customer-name', href: routeHash({...route, resource: row.id, page: 1}), text: row.name || '이름 미등록'})),
+      el('td', {}, el('span', {className: `customer-status status-${row.status}`, text: statusNames[row.status]})),
+      el('td', {}, row.email ? el('span', {text: row.email}) : el('span', {className: 'customer-status status-DORMANT', text: '이메일 미등록'})),
       el('td', {text: formatMoney(row.total_purchase_amount)}), el('td', {text: row.order_count}), el('td', {text: row.last_purchase_at ? formatTime(row.last_purchase_at) : '미구매'})))));
-  root.replaceChildren(heading('Customers', `조건에 맞는 고객 ${result.total.toLocaleString()}명 · 데이터 버전 ${result.data_version}`),
-    el('section', {className: 'card stack'}, form, el('p', {className: 'small muted', text: '구매 합계·상태는 상단 종료일 기준입니다. 기간 활동과 가입일 필터는 별도로 적용됩니다.'}),
+  const tips = ['이름을 누르면 고객 상세를 확인할 수 있습니다.', '상단 종료일 기준의 고객 상태입니다.', '이메일은 일부 마스킹합니다.', '상단 종료일 이전 완료 주문 합계입니다.', '상단 종료일 이전 완료 주문 수입니다.', '상단 종료일 이전 마지막 완료 주문입니다.'];
+  table.querySelectorAll('thead th').forEach((cell, i) => cell.append(el('span', {className: 'column-help', tabindex: '0', title: tips[i], 'aria-label': tips[i], text: ' ⓘ'})));
+  root.replaceChildren(heading('Customers', filtered ? `조건에 맞는 고객 ${result.total.toLocaleString()}명 (전체 ${all.total.toLocaleString()}명 중)` : `고객 ${result.total.toLocaleString()}명`),
+    el('section', {className: 'card stack'}, form,
       result.items.length ? el('div', {className: 'table-scroll'}, table) : stateCard('조건에 맞는 고객이 없습니다', '검색어·상태·기간을 변경해보세요.'), pagination(route, result.total, result.page_size, signal)));
 }
 async function renderDetail(root, route, signal) {
@@ -45,7 +51,7 @@ async function renderDetail(root, route, signal) {
     ['평균 주문액', c.average_order_amount === null ? '미구매' : formatMoney(c.average_order_amount)],
     ['최근 구매', c.last_purchase_at ? formatTime(c.last_purchase_at) : '미구매'], ['선호 카테고리', result.preferred_category || '집계 자료 없음'],
     ['RFM', `R ${result.rfm.recency} / F ${result.rfm.frequency} / M ${result.rfm.monetary} · ${result.rfm.version}`]];
-  root.replaceChildren(heading(c.name || c.external_id, `고객 상세 · 데이터 버전 ${result.data_version}`, button('고객 목록으로', () => navigate({resource: '', page: 1}), signal)),
+  root.replaceChildren(heading(c.name || c.external_id, c.external_id, button('고객 목록으로', () => navigate({resource: '', page: 1}), signal)),
     el('div', {className: 'stack'}, el('section', {className: 'card'}, el('h2', {text: '고객 프로필'}), el('table', {}, el('tbody', {}, ...rows.map(([label, value]) => el('tr', {}, el('th', {scope: 'row', text: label}), el('td', {text: value})))))),
       el('section', {className: 'card'}, el('h2', {text: '채널 수신 상태'}), el('p', {className: 'metadata', text: '채널 동의는 현재 저장 상태입니다. 과거 시점의 동의 이력은 복원하지 않습니다.'}),
         ...result.channels.map(ch => el('p', {text: `${ch.channel}: ${ch.consent ? '동의' : '미동의'} · 연락처 ${ch.is_valid ? '유효' : '무효 또는 없음'} · hard bounce ${ch.hard_bounce ? '있음' : '없음'}`}))),

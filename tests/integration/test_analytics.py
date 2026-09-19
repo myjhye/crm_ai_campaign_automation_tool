@@ -138,3 +138,12 @@ def test_status_day_boundaries(database):
         response = client.get("/api/v1/customers", params={"dataset_id":str(dataset_id), "from":START.isoformat(), "to":END.isoformat()})
         assert response.status_code == 200, response.text
         assert {r["external_id"]:r["status"] for r in response.json()["items"]} == {"29":"ACTIVE", "30":"CHURN_RISK", "59":"CHURN_RISK", "60":"DORMANT"}
+
+
+def test_signup_sort_uses_dates_in_both_directions(fixture):
+    client, params, ids, _ = fixture
+    for direction in ("asc", "desc"):
+        rows = client.get("/api/v1/customers", params={**params, "sort": "signup_at", "direction": direction}).json()["items"]
+        dates = [datetime.fromisoformat(row["signup_at"]) for row in rows]
+        assert dates == sorted(dates, reverse=direction == "desc")
+        assert rows[0 if direction == "desc" else -1]["id"] == str(ids["C"])
