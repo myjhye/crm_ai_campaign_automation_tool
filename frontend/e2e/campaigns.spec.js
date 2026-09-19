@@ -1,0 +1,54 @@
+import {test,expect} from '@playwright/test';
+const id='11111111-1111-4111-8111-111111111111', revision='22222222-2222-4222-8222-222222222222', campaign='33333333-3333-4333-8333-333333333333';
+test('campaign copy editor saves A/B, switches SMS and recovers conflict',async ({page}) => {
+  let saved=null, conflict=false;
+  const dataset={id,name:'체험용 샘플',purpose:'ANALYSIS',source:'DEMO',customer_count:100,order_count:300,event_count:2000,version:1,reference_at:'2026-09-19T00:00:00Z',created_at:'2026-09-19T00:00:00Z',updated_at:'2026-09-19T00:00:00Z'};
+  await page.route('**/api/v1/**',route => {
+    const url=new URL(route.request().url()), method=route.request().method(), path=url.pathname;
+    if(path.endsWith('/datasets')) return route.fulfill({json:{items:[dataset],total:1,page:1,page_size:100}});
+    if(path.endsWith('/segments')) return route.fulfill({json:{items:[{id:revision,revision_id:revision,name:'휴면 VIP'}],total:1,page:1,page_size:100}});
+    if(path.endsWith('/copy-policy')) return route.fulfill({json:{version:1,channels:{EMAIL:{subject_max:120,body_max:5000},PUSH:{subject_max:60,body_max:300},SMS:{subject_max:0,body_max:500}}}});
+    if(method==='POST'||method==='PUT') {
+      if(conflict) return route.fulfill({status:409,json:{error:{message:'다른 방문자가 수정했습니다.'}}});
+      saved={...route.request().postDataJSON(),id:campaign,version:(saved?.version||0)+1,status:'DRAFT'};
+      return route.fulfill({status:method==='POST'?201:200,json:saved});
+    }
+    return route.fulfill({json:path.endsWith(campaign)?saved:{items:saved?[saved]:[],total:saved?1:0,page:1,page_size:20}});
+  });
+  await page.goto('/#/campaigns');
+  await expect(page.getByText('제외 없음 · 필요한 세그먼트만 체크하세요.')).toBeVisible();
+  const exclusion = page.getByRole('group',{name:'제외 세그먼트',exact:true}).getByRole('checkbox',{name:'휴면 VIP',exact:true});
+  await exclusion.click();
+  await expect(exclusion).toBeChecked();
+  await expect(page.getByText('1개 선택됨 · 체크를 해제하면 제외 조건에서 빠집니다.')).toBeVisible();
+  await exclusion.click();
+  await expect(exclusion).not.toBeChecked();
+  for(const [label,value] of [['캠페인 이름','재구매 캠페인'],['캠페인 목표','재구매 증가'],['KPI 목표값','5'],['혜택','10% 쿠폰'],['브랜드 톤','친근함'],['A안 제목','다시 만나요'],['B안 제목','쿠폰을 확인하세요'],['A안 본문','새로운 상품을 만나보세요'],['B안 본문','쿠폰으로 쇼핑하세요'],['A안 가설','신상품 강조'],['B안 가설','혜택 강조']]) await page.getByLabel(label,{exact:true}).fill(value);
+  const target = page.getByRole('group',{name:'대상 세그먼트',exact:true}).getByRole('checkbox',{name:'휴면 VIP',exact:true});
+  await target.click();
+  await expect(target).toBeChecked();
+  await target.click();
+  await expect(target).not.toBeChecked();
+  await target.click();
+  await page.getByLabel('A안 비율 (%)',{exact:true}).fill('40');
+  await page.getByRole('button',{name:'초안 저장 후 확인'}).click();
+  await expect(page.getByText('A/B 비율 합계를 100%로 맞춰주세요.')).toBeVisible();
+  await page.getByLabel('A안 비율 (%)',{exact:true}).fill('50');
+  await page.getByRole('button',{name:'초안 저장 후 확인'}).click();
+  await expect(page.getByText('캠페인 초안이 저장되었습니다.',{exact:true})).toBeVisible();
+  expect(saved.variants[0].allocation_bp).toBe(5000);
+  expect(saved.exclusion_revision_ids).toEqual([]);
+  await page.getByLabel('채널',{exact:true}).selectOption('SMS');
+  await expect(page.getByLabel('A안 제목',{exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'초안 저장 후 확인'}).click();
+  await expect.poll(() => saved.channel).toBe('SMS');
+  expect(saved.variants[0].subject).toBe('');
+  conflict=true;
+  await page.getByLabel('캠페인 이름',{exact:true}).fill('충돌 시 입력 유지');
+  await page.getByRole('button',{name:'초안 저장 후 확인'}).click();
+  await expect(page.getByRole('button',{name:'최신 내용 불러오기'})).toBeVisible();
+  await expect(page.getByLabel('캠페인 이름',{exact:true})).toHaveValue('충돌 시 입력 유지');
+  await page.getByRole('button',{name:'최신 내용 불러오기'}).click();
+  await expect(page.getByLabel('캠페인 이름',{exact:true})).toHaveValue('재구매 캠페인');
+  await page.screenshot({path:'test-results/campaigns.png',fullPage:true});
+});
