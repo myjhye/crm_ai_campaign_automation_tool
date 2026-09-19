@@ -41,7 +41,7 @@ ReportingPeriod는 `[from,to)`이며 `from < to`여야 한다. JSON 직렬화 �
 
 모든 응답에 서버가 생성한 `X-Request-ID`를 포함한다. 오류 본문 request_id는 이 헤더와 동일하다. 입력값·내부 예외 메시지를 응답에 복사하지 않는다. details는 위치와 검증 오류 종류만 제공한다. 업무에서 사용자에게 보여줄 메시지는 AppError로 명시한다.
 
-현재 `/`, `/docs`, `/redoc`, `/openapi.json`, `/api/v1/health`가 실행된다. 목록·기간 처리는 재사용 모델과 테스트로 검증하며 확인용 업무 API를 임의로 추가하지 않는다.
+단계 4부터 `/`는 HTML 화면이며 기존 API 정보 JSON은 `/api/v1/info`로 이동했다. `/docs`, `/redoc`, `/openapi.json`, `/api/v1/health`는 유지한다. 정적 CSS·JS는 `/static/styles`, `/static/src`에서 제공한다.
 
 구현 파일: `app/schemas/common.py`, `app/core/errors.py`, `app/core/time.py`, `app/api/deps.py`.
 오류 처리 구현은 [FastAPI 공식 오류 처리 문서](https://fastapi.tiangolo.com/tutorial/handling-errors/)를 따른다. Decimal·timezone 검증은 [Pydantic 표준 타입 문서](https://docs.pydantic.dev/latest/api/standard_library_types/)를 참고했다.

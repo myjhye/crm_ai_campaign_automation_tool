@@ -4,6 +4,10 @@ Python 3.11 이상을 사용하는 FastAPI 백엔드 기본 프로젝트입니�
 
 ## 설치 및 실행 (Windows PowerShell)
 
+설치와 `.env` 설정을 한 번 마친 뒤에는 VS Code에서 **Ctrl + Shift + P → Tasks: Run Task(작업: 작업 실행) → GrowthPilot: 서버와 화면 실행**을 선택합니다. PostgreSQL 시작 → 마이그레이션 → FastAPI 실행 → 기본 브라우저 열기까지 자동으로 진행합니다. Docker Desktop은 먼저 실행해두세요.
+
+터미널에서는 루트의 `powershell -ExecutionPolicy Bypass -File .\start-dev.ps1`로 동일하게 실행합니다. 종료는 실행 터미널에서 `Ctrl+C`입니다. PostgreSQL은 유지되며 별도로 종료하려면 `docker compose stop db`를 사용합니다. 포트 변경은 `-Port 8001`, 브라우저 생략은 `-NoBrowser`, Docker 시작 생략은 `-SkipDatabase` 옵션입니다. `-SkipDatabase`도 설정된 DB에 마이그레이션은 수행합니다.
+
 프로젝트 루트에서 실행합니다. 가상환경 활성화 없이 실행할 수 있습니다.
 
 ```powershell
@@ -18,7 +22,8 @@ docker compose up -d --wait db
 
 이미 `.env`가 있으면 복사 단계를 생략합니다. 서버 종료는 `Ctrl+C`입니다.
 
-- API 정보: http://127.0.0.1:8000/
+- GrowthPilot 화면: http://127.0.0.1:8000/
+- API 정보: http://127.0.0.1:8000/api/v1/info
 - 상태 확인: http://127.0.0.1:8000/api/v1/health
 - DB 연결 확인: http://127.0.0.1:8000/api/v1/ready
 - Swagger UI: http://127.0.0.1:8000/docs
@@ -40,7 +45,7 @@ docker compose up -d --wait db
 | `WORKER_HEARTBEAT_SECONDS` | `10` | 실행권 갱신 간격, lease의 절반 미만 |
 | `WORKER_POLL_SECONDS` | `1` | 실행 가능한 작업이 없을 때 조회 간격 |
 
-프런트엔드 연동 예시: `CORS_ORIGINS=["http://localhost:3000"]`
+기본 화면은 API와 같은 origin을 사용하므로 CORS 설정이나 별도 프런트 서버가 필요하지 않습니다.
 
 ## 구조
 
@@ -83,9 +88,9 @@ docs/                     # 요구사항과 상세 계획
 현재는 단계 0 공통 규칙, 단계 1 DB·worker, 단계 2 데이터셋·감사 이력, 단계 3 CSV 적재·샘플 생성 백엔드를 구현했습니다.
 `/api/v1/health`는 프로세스, `/api/v1/ready`는 DB 연결을 검사합니다. readiness는 스키마 최신 여부까지 검사하지 않으므로 배포 시 migration을 별도로 실행합니다.
 
-현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 단계 3 백엔드까지입니다.
-화면·AI 호출·캠페인 실행은 후속 단계입니다.
-빈 디렉터리는 `.gitkeep`으로 버전 관리합니다. 프런트엔드 도구 설치는 단계 4에서 진행합니다.
+현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 단계 3 백엔드와 단계 4 공통 화면까지입니다.
+데이터셋 선택·생성·이름 변경은 화면에서 사용할 수 있습니다. 고객 지표·캠페인·AI 대화는 후속 단계입니다.
+화면 실행에는 Node나 빌드가 필요하지 않습니다. 프런트 테스트는 `npm --prefix frontend ci`, `npm --prefix frontend test`로 실행합니다. 브라우저 테스트와 구현 설명은 [단계 4 실행 안내](docs/phase_4_frontend.md)를 참고하세요.
 PostgreSQL은 `compose.yaml`로, API와 worker는 로컬 `.venv`로 실행합니다. 서버 Dockerfile과 CI는 배포 단계에서 추가합니다.
 
 업무 요청은 `route → service → repository → DB` 순서로 구성합니다.
