@@ -1,14 +1,15 @@
 import {el, button, heading, formatTime} from '../../components/dom.js';
 import {navigate} from '../../app/router.js';
+import {datasetSummary, sourceNames} from '../../components/dataset.js';
 
 export function renderOverview(root, selected, total, signal) {
   root.replaceChildren(heading('Overview', '고객을 이해하고, 다음 캠페인을 준비하세요.', el('span', {className: 'badge', text: '공개 데모'})),
     el('section', {className: 'hero'}, el('span', {className: 'eyebrow', text: 'FROM DATA TO ACTION'}),
-      el('h2', {text: '성장을 만드는 다음 한 걸음.'}), el('p', {text: '준비된 데이터셋을 탐색하는 것부터 시작하세요. 고객 분석과 캠페인 도구가 이 공간에 차례로 연결됩니다.'}),
+      el('h2', {text: selected ? '성장을 만드는 다음 한 걸음.' : '체험용 샘플을 만드시겠어요?'}), el('p', {text: '준비된 분석용 데이터가 없다면 데이터 관리에서 데이터셋을 만들 수 있습니다. CSV 적재 또는 샘플 생성이 완료되면 여기에서 고객과 주문을 살펴볼 수 있습니다.'}),
       button('데이터셋 살펴보기 →', () => navigate({view: 'data', resource: '', page: 1, q: ''}), signal, 'button')),
     el('section', {className: 'grid metric-grid', 'aria-label': '현재 연결 상태'},
       metric('공개 데이터셋', total.toLocaleString(), '현재 서버에 등록된 데이터셋'),
-      metric('선택한 데이터셋', selected?.name || '선택 없음', selected ? `이름 버전 ${selected.version} · ${selected.source}` : '데이터셋을 만들어 시작하세요.'),
+      metric('선택한 데이터셋', selected?.name || '선택 없음', selected ? `${sourceNames[selected.source]} · ${datasetSummary(selected)}` : '데이터셋을 만들어 시작하세요.'),
       metric('고객·구매 지표', '집계 연결 예정', '고객·대시보드 단계에서 제공', true),
       metric('캠페인 성과', '아직 제공되지 않음', '모의 발송·성과 집계 연결 후 제공', true)),
     el('section', {className: 'card'}, el('div', {className: 'row spread'}, el('h2', {text: '데이터에서 캠페인까지'}), el('span', {className: 'badge', text: '구현 예정 흐름'})),

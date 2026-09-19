@@ -41,6 +41,8 @@ const isTimestamp = value => typeof value === 'string' && /(?:Z|[+-]\d\d:\d\d)$/
 /** @returns {boolean} */
 export function isDataset(row) {
   return row !== null && typeof row === 'object' && isUUID(row.id) && typeof row.name === 'string'
+    && row.purpose === 'ANALYSIS'
+    && ['customer_count', 'order_count', 'event_count'].every(key => Number.isInteger(row[key]) && row[key] >= 0)
     && ['DEMO', 'UPLOADED', 'SIMULATED'].includes(row.source) && Number.isInteger(row.version) && row.version > 0
     && isTimestamp(row.created_at) && isTimestamp(row.updated_at)
     && (row.reference_at === null || isTimestamp(row.reference_at));

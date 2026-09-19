@@ -12,7 +12,7 @@
 </head>
 <body>
   <a class="skip-link" href="#content">본문으로 건너뛰기</a>
-  <div class="workspace" id="workspace">
+  <div class="workspace ai-closed" id="workspace">
     <aside class="sidebar">
       <a class="brand" href="#/overview"><span class="brand-mark" aria-hidden="true">G↗</span><span>GrowthPilot<small>CRM WORKSPACE</small></span></a>
       <span class="nav-label">WORKSPACE</span>
@@ -22,7 +22,7 @@
     <div class="main-shell">
       <header class="topbar">
         <div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb">Overview</strong></div>
-        <button id="ai-toggle" class="button secondary" aria-expanded="true" aria-controls="ai-panel">✦ AI 어시스턴트</button>
+        <button id="ai-toggle" class="button secondary" aria-expanded="false" aria-controls="ai-panel">✦ AI 어시스턴트</button>
       </header>
       <section class="filters" aria-label="공통 조회 조건">
         <label class="dataset-control">데이터셋<select id="dataset-select"><option value="">불러오는 중…</option></select></label>
@@ -36,7 +36,7 @@
       </section>
       <div class="body-grid">
         <main id="content" tabindex="-1" aria-label="업무 화면"></main>
-        <aside id="ai-panel" class="ai-panel" aria-labelledby="ai-title">
+        <aside id="ai-panel" hidden class="ai-panel" aria-labelledby="ai-title">
           <div class="panel-heading"><span class="ai-symbol" aria-hidden="true">✦</span><h2 id="ai-title">AI 어시스턴트</h2><span class="badge">준비 중</span></div>
           <div class="ai-welcome"><div class="orb" aria-hidden="true">✦</div><h3>데이터에서<br>다음 행동까지.</h3><p>고객을 찾고, 캠페인을 구상하고,<br>성과를 함께 살펴볼 공간입니다.</p></div>
           <p class="small muted">연결 후 사용할 수 있는 요청 예시</p>

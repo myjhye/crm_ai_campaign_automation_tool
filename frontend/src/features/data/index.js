@@ -52,8 +52,8 @@ export async function renderData(root, route, selected, signal, refresh) {
     page.total ? '검색어를 지우거나 이전 페이지로 이동해보세요.' : '위 입력창에서 빈 데이터셋을 생성할 수 있습니다.'));
   for (const row of items) {
     stack.append(el('article', {className: 'card'},
-      el('div', {className: 'row spread'}, el('h2', {className: 'dataset-name', text: row.name}), el('span', {className: 'badge', text: row.id === selected?.id ? '선택됨' : row.source})),
-      el('p', {className: 'metadata', text: `ID ${row.id} · 이름 버전 ${row.version}`}),
+      el('div', {className: 'row spread'}, el('h2', {className: 'dataset-name', text: row.name}), el('span', {className: 'badge', text: row.id === selected?.id ? '선택됨' : sourceNames[row.source]})),
+      el('p', {className: 'metadata', text: datasetSummary(row)}),
       el('p', {className: 'metadata', text: `데이터 기준 시점: ${formatTime(row.reference_at)}`}),
       button('이 데이터셋 선택', () => navigate({dataset: row.id}), signal, 'button ghost'),
       el('div', {style: 'margin-top:18px'}, nameForm({row, signal, refresh})),
@@ -67,3 +67,4 @@ export async function renderData(root, route, selected, signal, refresh) {
   stack.append(el('nav', {className: 'pagination', 'aria-label': '데이터셋 페이지'}, prev, el('span', {className: 'small', text: `${route.page} / ${lastPage} 페이지`}), next),
     stateCard('CSV 업로드 화면은 준비 중입니다', 'CSV 미리보기·확정 적재 API는 구현되어 있습니다. 화면 연결 전에는 API 문서에서 계약을 확인할 수 있습니다.', el('a', {className: 'button secondary', href: '/docs', text: 'API 문서 열기'})));
 }
+import {datasetSummary, sourceNames} from '../../components/dataset.js';

@@ -1,3 +1,5 @@
+import {renderDashboard} from '../features/dashboard/index.js';
+import {renderCustomers} from '../features/customers/index.js';
 import {datasets} from '../api/client.js';
 import {pages, startRouter, navigate, routeHash, apiPeriod, defaultPeriod} from './router.js';
 import {store} from './store.js';
@@ -55,7 +57,9 @@ async function render(route) {
     store.set({selectedDataset: selected});
     document.getElementById('ai-context').textContent = selected ? `선택 데이터: ${selected.name}` : '데이터셋을 선택해주세요.';
     if (page.total > 100) filterMessage.textContent += ' · 선택 목록은 첫 100개, 전체는 Data 메뉴에서 확인';
-    if (route.resource) content.replaceChildren(heading(title, `리소스 ${route.resource}`), stateCard('상세 화면 준비 중', '주소의 리소스 ID는 유지됩니다. 이 업무의 상세 조회 API가 연결되면 내용을 표시합니다.', button('목록으로', () => navigate({resource: ''}), signal)));
+    if (route.view === 'customers' && selected) await renderCustomers(content, route, signal);
+    else if (route.resource) content.replaceChildren(heading(title, `리소스 ${route.resource}`), stateCard('상세 화면 준비 중', '주소의 리소스 ID는 유지됩니다. 이 업무의 상세 조회 API가 연결되면 내용을 표시합니다.', button('목록으로', () => navigate({resource: ''}), signal)));
+    else if (route.view === 'overview' && selected) await renderDashboard(content, route, selected, signal);
     else if (route.view === 'overview') renderOverview(content, selected, page.total, signal);
     else if (route.view === 'data') await renderData(content, route, selected, signal, refresh);
     else {

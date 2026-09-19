@@ -10,7 +10,7 @@ HTML·CSS·JavaScript의 브라우저 ES modules를 사용한다. 별도 빌드 
 | `src/features/` | Overview·데이터셋 관리 |
 | `e2e/` | 사용자 업무 흐름 테스트 |
 
-현재 데이터셋 선택·목록·생성·이름 수정이 실제 API에 연결되어 있다. 고객 KPI·업로드 화면·캠페인·AI 대화는 준비 상태로 표시한다. 로그인은 없다.
+현재 데이터셋 관리와 고객 목록·상세·타임라인, 대시보드 KPI·상태 분포·퍼널이 실제 API에 연결되어 있다. 업로드 화면·캠페인·AI 대화는 준비 상태로 표시한다. 로그인은 없다. 단계 5의 집계 기준과 실행법은 [고객·대시보드 안내](../docs/phase_5_customer_analytics.md)를 참고한다.
 
 Node는 테스트에만 필요하다. frontend 디렉터리에서 `npm ci`, `npm test`, `npx playwright install chromium`, `npm run test:e2e`를 실행한다. E2E는 루트 `.venv`로 FastAPI를 자동 실행하고 업무 API 응답을 대체하므로 실제 DB를 변경하지 않는다.
 
