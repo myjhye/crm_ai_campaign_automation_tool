@@ -116,3 +116,50 @@ def test_upgrade_preserves_existing_dataset(raw_database):
         row = connection.execute(text("SELECT version, created_at=updated_at AS unchanged FROM datasets WHERE id=:id"), {"id": dataset_id}).one()
         assert row.version == 1 and row.unchanged
         command.check(cfg)
+
+
+def test_system_hidden_and_populated_default_across_pages(client, database):
+    from datetime import datetime, timezone
+    from app.models.customers import Customer
+    with database.sessions.begin() as session:
+        populated = Dataset(name="Existing edited sample")
+        system = Dataset(name="Worker diagnostic", purpose="SYSTEM")
+        session.add_all([populated, system])
+        session.flush()
+        populated_id, system_id = populated.id, system.id
+        session.add(Customer(dataset_id=populated.id, external_id="one", signup_at=datetime.now(timezone.utc)))
+        session.add_all([Dataset(name=f"Empty {i}") for i in range(105)])
+    page = client.get("/api/v1/datasets?page_size=100").json()
+    assert page["total"] == 106
+    assert page["items"][0]["id"] == str(populated_id)
+    assert page["items"][0]["customer_count"] == 1
+    assert page["items"][0]["order_count"] == 0
+    assert all(row["purpose"] == "ANALYSIS" for row in page["items"])
+    assert "Worker diagnostic" not in str(page)
+    assert client.get(f"/api/v1/datasets/{system_id}").status_code == 404
+    assert client.put(f"/api/v1/datasets/{system_id}", json={"name": "Changed", "version": 1}).status_code == 404
+    assert client.post("/api/v1/datasets", json={"name": "Hidden", "purpose": "SYSTEM"}).status_code == 422
+    detail = client.get(f"/api/v1/datasets/{populated_id}").json()
+    assert detail["name"] == "Existing edited sample" and detail["customer_count"] == 1
+
+
+def test_purpose_migration_preserves_names(raw_database):
+    cfg = Config("alembic.ini")
+    with raw_database.engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.upgrade(cfg, "003b")
+        for name in ("Worker diagnostic", "Demo small / seed 42", "My edited name"):
+            connection.execute(text("INSERT INTO datasets(id,name,source) VALUES (:id,:name,'DEMO')"), {"id": uuid4(), "name": name})
+        command.upgrade(cfg, "003c")
+        rows = dict(connection.execute(text("SELECT name,purpose FROM datasets")).all())
+        assert rows == {"Worker diagnostic": "SYSTEM", "Demo small / seed 42": "ANALYSIS", "My edited name": "ANALYSIS"}
+def test_legacy_sample_name_translation_is_narrow(raw_database):
+    cfg = Config("alembic.ini")
+    with raw_database.engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.upgrade(cfg, "003c")
+        for name, version in (("Demo small / seed 42", 1), ("Demo demo / seed 42", 1), ("Edited sample", 1), ("Demo small / seed 42", 2)):
+            connection.execute(text("INSERT INTO datasets(id,name,source,version) VALUES (:id,:name,'DEMO',:version)"), {"id": uuid4(), "name": name, "version": version})
+        command.upgrade(cfg, "head")
+        names = connection.execute(text("SELECT name FROM datasets")).scalars().all()
+        assert sorted(names) == sorted(["체험용 소형 샘플", "체험용 전체 샘플", "Edited sample", "Demo small / seed 42"])

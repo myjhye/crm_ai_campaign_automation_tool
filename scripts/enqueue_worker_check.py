@@ -20,7 +20,7 @@ def main():
     db = Database(settings.database_url.get_secret_value())
     try:
         with db.sessions.begin() as session:
-            dataset = Dataset(name="Worker diagnostic")
+            dataset = Dataset(name="Worker diagnostic", purpose="SYSTEM")
             session.add(dataset)
             session.flush()
             job = enqueue(session, dataset_id=dataset.id, kind="system.check", key="diagnostic",

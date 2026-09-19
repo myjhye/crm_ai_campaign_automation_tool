@@ -12,10 +12,12 @@ class Dataset(IdentityMixin, Base):
     __tablename__ = "datasets"
     reference_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     name: Mapped[str] = mapped_column(String(200))
+    purpose: Mapped[str] = mapped_column(String(20), default="ANALYSIS", server_default="ANALYSIS")
     source: Mapped[str] = mapped_column(String(20), default="DEMO", server_default="DEMO")
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (
+        CheckConstraint("purpose IN ('ANALYSIS','SYSTEM')", name="purpose"),
         CheckConstraint("source IN ('DEMO','UPLOADED','SIMULATED')", name="source"),
         CheckConstraint("version > 0", name="version"),
     )

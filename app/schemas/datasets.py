@@ -20,6 +20,10 @@ class DatasetResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     name: str
+    purpose: Literal["ANALYSIS", "SYSTEM"]
+    customer_count: int = 0
+    order_count: int = 0
+    event_count: int = 0
     source: Literal["DEMO", "UPLOADED", "SIMULATED"]
     version: int
     created_at: datetime

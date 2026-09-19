@@ -76,7 +76,8 @@ def seed_demo(session, *, seed, reference_at, size="small", dataset_key="default
     existing = session.get(Dataset, dataset_id)
     if existing:
         return existing, False
-    dataset = Dataset(id=dataset_id, name=f"Demo {size} / seed {seed}", source="DEMO", reference_at=reference_at)
+    name = "체험용 소형 샘플" if size == "small" else "체험용 전체 샘플"
+    dataset = Dataset(id=dataset_id, name=name, source="DEMO", reference_at=reference_at)
     session.add(dataset)
     session.flush()
     for kind, sources in source_rows(seed, reference_at, size):
