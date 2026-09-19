@@ -15,3 +15,5 @@ api_router.include_router(imports.router)
 
 from app.api.routes import analytics
 api_router.include_router(analytics.router)
+from app.api.routes import segments
+api_router.include_router(segments.router)

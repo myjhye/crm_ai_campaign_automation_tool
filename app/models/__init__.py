@@ -6,3 +6,4 @@ from app.models.jobs import DatasetVersion, ImportBatch, Job
 
 __all__ = ["AuditLog", "Dataset", "Customer", "CustomerChannel", "CustomerEvent",
            "Order", "OrderItem", "Product", "DatasetVersion", "ImportBatch", "Job"]
+from app.models.segments import Segment, SegmentRevision
