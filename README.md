@@ -80,10 +80,10 @@ docs/                     # 요구사항과 상세 계획
 ```
 
 새 API는 `app/api/routes/`에 추가하고 `app/api/router.py`에 등록합니다.
-현재는 단계 0 공통 규칙과 단계 1 DB·마이그레이션·worker 기반을 구현했습니다.
+현재는 단계 0 공통 규칙, 단계 1 DB·worker, 단계 2 데이터셋·감사 이력 백엔드를 구현했습니다.
 `/api/v1/health`는 프로세스, `/api/v1/ready`는 DB 연결을 검사합니다. readiness는 스키마 최신 여부까지 검사하지 않으므로 배포 시 migration을 별도로 실행합니다.
 
-현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 단계 1까지입니다.
+현재 구성 범위는 [상세 구현 계획](docs/detailed_implementation_plan.md)의 단계 2 백엔드 기반까지입니다.
 AI 호출·고객 업로드·캠페인 실행은 후속 단계입니다.
 빈 디렉터리는 `.gitkeep`으로 버전 관리합니다. 프런트엔드 도구 설치는 단계 4에서 진행합니다.
 PostgreSQL은 `compose.yaml`로, API와 worker는 로컬 `.venv`로 실행합니다. 서버 Dockerfile과 CI는 배포 단계에서 추가합니다.
@@ -135,5 +135,12 @@ API와 별도 터미널에서 실행합니다.
 
 현재 handler는 `system.check`이며 고객 CSV 적재와 모의 발송 handler는 이후 단계에서 추가합니다.
 상세 설정과 복구 방식은 [단계 1 실행 안내](docs/phase_1_database_worker.md)를 참고하세요.
+
+## 공개 데이터셋·감사 이력 API
+
+`alembic upgrade head`로 `003a`를 적용하면 `/api/v1/datasets`에서 빈 데이터셋 생성·조회,
+`PUT /api/v1/datasets/{id}`에서 version 기반 이름 변경을 사용할 수 있습니다.
+`GET /api/v1/audit-logs`에서 변경 이력을 조회합니다. 로그인은 필요하지 않습니다.
+샘플 데이터와 화면은 후속 단계이며, 입력 예시와 충돌 처리는 [단계 2 실행 안내](docs/phase_2_demo_audit.md)에 정리했습니다.
 
 FastAPI 실행 방식은 [공식 서버 실행 문서](https://fastapi.tiangolo.com/deployment/manually/)를 참고했습니다.
