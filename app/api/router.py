@@ -19,3 +19,5 @@ from app.api.routes import segments
 api_router.include_router(segments.router)
 from app.api.routes import ai
 api_router.include_router(ai.router)
+from app.api.routes import campaigns
+api_router.include_router(campaigns.router)

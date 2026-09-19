@@ -8,3 +8,4 @@ __all__ = ["AuditLog", "Dataset", "Customer", "CustomerChannel", "CustomerEvent"
            "Order", "OrderItem", "Product", "DatasetVersion", "ImportBatch", "Job"]
 from app.models.segments import Segment, SegmentRevision
 from app.models.ai import AIActionProposal, AIExecutionLog
+from app.models.campaigns import Campaign, CampaignVariant, CampaignExclusion
