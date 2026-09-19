@@ -9,6 +9,13 @@ async function mockAPI(page, {empty = false, conflict = false} = {}) {
   let rows = empty ? [] : [{...row}];
   await page.route('**/api/v1/**', async route => {
     const request = route.request(); const url = new URL(request.url());
+    if (url.pathname === '/api/v1/segments/fields') return route.fulfill({json: {items: [
+      {name: 'days_since_last_purchase', label: 'Days', type: 'integer', comparisons: ['GTE']},
+      {name: 'total_purchase_amount', label: 'Amount', type: 'money', comparisons: ['GTE']},
+      {name: 'email_consent', label: 'Consent', type: 'boolean', comparisons: ['EQ']},
+      {name: 'order_count', label: 'Orders', type: 'integer', comparisons: ['GTE']},
+    ]}});
+    if (url.pathname === '/api/v1/segments') return route.fulfill({json: {items: [], total: 0, page: 1, page_size: 20}});
     const analytics = analyticsFixture(url);
     if (analytics) return route.fulfill({json: analytics});
     if (request.method() === 'POST') {
@@ -148,4 +155,21 @@ test('customer identity, status and sorting controls are clear', async ({page}) 
   const request = page.waitForRequest(request => request.url().includes('/customers?') && request.url().includes('direction=asc'));
   await page.getByRole('button', {name: '고객 조회', exact: true}).click();
   expect((await request).url()).toContain('sort=signup_at');
+});
+test('navigation keeps the existing view visible until the next response arrives', async ({page}) => {
+  await mockAPI(page); await page.goto('/');
+  await expect(page.locator('.overview-intro')).toBeVisible();
+  let release;
+  const hold = new Promise(resolve => {release = resolve;});
+  await page.route('**/api/v1/customers?**', async route => {
+    await hold;
+    await route.fulfill({json: analyticsFixture(new URL(route.request().url()))});
+  });
+  await page.getByRole('link', {name: 'Customers', exact: true}).click();
+  await expect(page.locator('#content')).toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator('.overview-intro')).toBeVisible();
+  await expect(page.locator('#content .loading-mark')).toHaveCount(0);
+  release();
+  await expect(page.getByRole('heading', {name: 'Customers', exact: true})).toBeVisible();
+  await expect(page.locator('#content')).not.toHaveAttribute('inert', '');
 });

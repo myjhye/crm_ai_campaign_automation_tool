@@ -1,3 +1,4 @@
+import {renderSegments} from '../features/segments/index.js';
 import {renderDashboard} from '../features/dashboard/index.js';
 import {renderCustomers} from '../features/customers/index.js';
 import {datasets} from '../api/client.js';
@@ -14,6 +15,8 @@ const toInput = document.getElementById('period-to');
 const filterMessage = document.getElementById('filter-message');
 let currentRequest;
 let firstRender = true;
+let hasRenderedContent = false;
+let displayedView = null;
 
 function refresh(dataset) {
   const route = store.get().route;
@@ -26,8 +29,12 @@ async function render(route) {
   currentRequest = new AbortController();
   const {signal} = currentRequest;
   store.set({route, loading: true, selectedDataset: null, error: null});
-  content.replaceChildren(loading()); content.setAttribute('aria-busy', 'true');
-  selector.disabled = true;
+  if (!hasRenderedContent) content.replaceChildren(loading());
+  content.setAttribute('aria-busy', 'true');
+  // Keep the previous view visible until the next renderer has its data.
+  // Its listeners were aborted above, so prevent interaction with stale controls.
+  content.inert = true;
+  if (!hasRenderedContent) selector.disabled = true;
   fromInput.value = route.from; toInput.value = route.to;
   fromInput.setCustomValidity(''); toInput.setCustomValidity('');
   filterMessage.textContent = 'Asia/Seoul · 종료일 포함';
@@ -40,6 +47,7 @@ async function render(route) {
   try {
     if (route.issues.length) {
       content.replaceChildren(stateCard('주소를 확인해주세요', route.issues.join(' '), button('첫 화면으로', () => navigate({view: 'overview', dataset: '', resource: '', page: 1, q: '', ...defaultPeriod()}, {replace: true}), signal), true));
+      hasRenderedContent = true;
       return;
     }
     if (location.hash !== routeHash(route)) { navigate({}, {replace: true}); return; }
@@ -58,6 +66,7 @@ async function render(route) {
     document.getElementById('ai-context').textContent = selected ? `선택 데이터: ${selected.name}` : '데이터셋을 선택해주세요.';
     if (page.total > 100) filterMessage.textContent += ' · 선택 목록은 첫 100개, 전체는 Data 메뉴에서 확인';
     if (route.view === 'customers' && selected) await renderCustomers(content, route, signal);
+    else if (route.view === 'segments' && selected) await renderSegments(content, route, signal);
     else if (route.resource) content.replaceChildren(heading(title, `리소스 ${route.resource}`), stateCard('상세 화면 준비 중', '주소의 리소스 ID는 유지됩니다. 이 업무의 상세 조회 API가 연결되면 내용을 표시합니다.', button('목록으로', () => navigate({resource: ''}), signal)));
     else if (route.view === 'overview' && selected) await renderDashboard(content, route, selected, signal);
     else if (route.view === 'overview') renderOverview(content, selected, page.total, signal);
@@ -75,6 +84,7 @@ async function render(route) {
         stateCard('업무 기능 연결 준비 중', '현재 공통 화면과 데이터셋 관리를 사용할 수 있습니다. 아직 없는 지표나 실행 결과는 표시하지 않습니다.', button('데이터셋 관리로 이동', () => navigate({view: 'data', page: 1, q: ''}), signal)),
         el('p', {className: 'metadata', text: `선택 데이터: ${selected?.name || '없음'} · 기준 시점: ${formatTime(selected?.reference_at)}`}));
     }
+    if (!signal.aborted) hasRenderedContent = true;
   } catch (error) {
     if (error.name === 'AbortError' || signal.aborted) return;
     store.set({error});
@@ -82,10 +92,12 @@ async function render(route) {
       el('div', {className: 'row', style: 'justify-content:center'}, button('다시 시도', () => refresh(route.dataset), signal),
         error.status === 404 ? button('데이터셋 다시 선택', () => navigate({dataset: '', resource: ''}, {replace: true}), signal) : null), true));
     document.getElementById('ai-context').textContent = '데이터 연결 상태를 확인해주세요.';
+    hasRenderedContent = true;
   } finally {
     if (!signal.aborted) {
-      store.set({loading: false}); content.removeAttribute('aria-busy');
-      if (!firstRender && !store.get().loading) content.focus({preventScroll: true});
+      store.set({loading: false}); content.removeAttribute('aria-busy'); content.inert = false;
+      if (!firstRender && displayedView !== route.view) content.focus({preventScroll: true});
+      if (hasRenderedContent) displayedView = route.view;
       firstRender = false;
     }
   }
