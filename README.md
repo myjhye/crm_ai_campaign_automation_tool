@@ -162,3 +162,7 @@ API와 별도 터미널에서 실행합니다.
 CSV는 `/api/v1/data/import/{kind}/preview`에 `text/csv`로 전송하고, 반환된 배치를 `/commit`으로 확정합니다. 실행 중인 worker가 있어야 적재가 완료됩니다. CSV 예제·PowerShell 요청·중복 처리·원천 대조·보관 정리는 [단계 3 실행 안내](docs/phase_3_data_import.md)에 정리했습니다.
 
 FastAPI 실행 방식은 [공식 서버 실행 문서](https://fastapi.tiangolo.com/deployment/manually/)를 참고했습니다.
+
+## 세그먼트 조건과 저장
+
+Segments에서 조건 빌더 또는 휴면 VIP 템플릿으로 대상을 미리보고 저장·수정·보관할 수 있습니다. 실행 전 Alembic을 `004`까지 적용하세요. [단계 6 구현 안내](docs/phase_6_segments.md)에 API 계약과 검증 범위를 정리했습니다. 자연어 입력과 실제 LLM은 다음 AI-A에서 연결합니다.
