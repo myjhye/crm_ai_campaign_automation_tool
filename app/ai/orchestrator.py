@@ -20,6 +20,9 @@ def payload_hash(payload):
 
 
 def chat(database, settings, query, request_id, provider=None):
+    if query.campaign_brief or query.campaign_id:
+        from app.ai.campaigns import propose
+        return propose(database,settings,query,request_id,provider)
     started = time.monotonic()
     # Close all transactions before waiting for the model.
     with database.sessions() as session:
@@ -83,11 +86,17 @@ def confirm(session, proposal_id, dataset_id, request_id):
             AIActionProposal.dataset_id == dataset_id).with_for_update())
         if proposal is None: raise AppError('NOT_FOUND', '제안을 찾을 수 없습니다.', 404)
         if proposal.confirmed_at:
+            if proposal.action_type != 'SEGMENT':
+                from app.services.campaigns import detail
+                return detail(session,dataset_id,proposal.campaign_id)
             return segments.detail(session, dataset_id, proposal.segment_id)
         if proposal.expires_at <= datetime.now(timezone.utc):
             raise AppError('AI_PROPOSAL_EXPIRED', '제안이 만료되었습니다. 다시 요청해주세요.')
         if payload_hash(proposal.payload) != proposal.payload_hash or UUID(proposal.payload['dataset_id']) != dataset_id:
             raise AppError('AI_PROPOSAL_CHANGED', '제안 내용이 변경되었습니다. 다시 요청해주세요.')
+        if proposal.action_type in ('CAMPAIGN_CREATE','CAMPAIGN_COPY'):
+            from app.ai.campaigns import apply
+            return apply(session,proposal,request_id)
         result = segments.save(session, SegmentWrite.model_validate(proposal.payload), request_id,
                                managed_transaction=True, created_source='AI')
         proposal.segment_id = result['id']

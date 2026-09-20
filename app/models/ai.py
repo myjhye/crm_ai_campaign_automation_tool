@@ -14,7 +14,12 @@ class AIActionProposal(IdentityMixin, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     segment_id: Mapped[UUID | None]
-    __table_args__ = (ForeignKeyConstraint(['dataset_id', 'segment_id'], ['segments.dataset_id', 'segments.id']),)
+    action_type: Mapped[str] = mapped_column(String(30),default='SEGMENT',server_default='SEGMENT')
+    campaign_id: Mapped[UUID | None]
+    data_version: Mapped[int | None] = mapped_column(Integer)
+    policy_version: Mapped[int | None] = mapped_column(Integer)
+    __table_args__ = (ForeignKeyConstraint(['dataset_id', 'segment_id'], ['segments.dataset_id', 'segments.id']),
+        ForeignKeyConstraint(['dataset_id','campaign_id'],['campaigns.dataset_id','campaigns.id']))
 
 
 class AIExecutionLog(IdentityMixin, Base):

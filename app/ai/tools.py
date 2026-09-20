@@ -14,3 +14,17 @@ TOOLS = [
          {'name': {'type': 'string'}, 'condition_json': {'type': 'string'}}),
     tool('clarify', '모호한 조건, 다른 기간 요청 또는 미지원 업무의 확인 질문을 합니다.', {'question': {'type': 'string'}}),
 ]
+
+COPY_PROPERTIES = {
+    'variants': {'type':'array','items':{'type':'object','properties':{
+        'variant_name':{'type':'string','enum':['A','B']}, 'subject':{'type':'string'},
+        'body':{'type':'string'}, 'hypothesis':{'type':'string'}},
+        'required':['variant_name','subject','body','hypothesis'],'additionalProperties':False}},
+    'rationale': {'type':'string'},
+}
+CAMPAIGN_TOOLS = [tool('create_campaign_draft','지정된 조건으로 새 캠페인 A/B 초안을 제안합니다.',COPY_PROPERTIES),
+                  tool('generate_copy','선택한 캠페인의 A/B 카피 교체를 제안합니다.',COPY_PROPERTIES)]
+
+BRIEF_TOOLS=[tool('plan_campaign','요청을 캠페인 설정으로 변환하거나 필요한 정보를 질문합니다.',{
+    'question':{'type':'string','description':'정보가 부족하면 확인 질문. 충분하면 빈 문자열.'},
+    'brief_json':{'type':'string','description':'CampaignBrief JSON. 질문할 때는 빈 문자열.'}})]

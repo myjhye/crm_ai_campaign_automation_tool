@@ -4,6 +4,7 @@ from app.repositories import campaigns as repository
 from app.services.datasets import require_dataset
 from app.services.audit import record_change
 from app.domain.campaigns.copy_policy import CURRENT_VERSION
+from contextlib import nullcontext
 
 FIELDS = ('name','objective','channel','benefit','brand_tone','primary_kpi','target_value','planned_at','coupon_expires_at','segment_revision_id')
 
@@ -32,8 +33,8 @@ def list_campaigns(session, query):
     return {'items':[summary(row) for row in rows], 'total':total, 'page':query.page, 'page_size':query.page_size}
 
 
-def save(session, request, request_id, campaign_id=None):
-    with session.begin():
+def save(session, request, request_id, campaign_id=None, *, managed_transaction=False):
+    with nullcontext() if managed_transaction else session.begin():
         if sum(v.allocation_bp for v in request.variants) != 10000:
             raise AppError('INVALID_ALLOCATION','A/B 비율 합계는 100%여야 합니다.',422)
         require_dataset(session,request.dataset_id,lock=True)
