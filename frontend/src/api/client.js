@@ -5,13 +5,13 @@ export class ApiError extends Error {
   }
 }
 
-/** @param {string} path @param {{signal?: AbortSignal, method?: string, body?: object, validate?: Function}} options */
-export async function request(path, {signal, method = 'GET', body, validate} = {}) {
+/** @param {string} path @param {{signal?: AbortSignal, method?: string, body?: object, validate?: Function, headers?: object}} options */
+export async function request(path, {signal, method = 'GET', body, validate, headers = {}} = {}) {
   if (!path.startsWith('/') || path.startsWith('//')) throw new TypeError('Relative API path required');
   let response;
   try {
     response = await fetch(`/api/v1${path}`, {method, signal, headers: {
-      Accept: 'application/json', ...(body === undefined ? {} : {'Content-Type': 'application/json'}),
+      Accept: 'application/json', ...(body === undefined ? {} : {'Content-Type': 'application/json'}), ...headers,
     }, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
   } catch (error) {
     if (error.name === 'AbortError') throw error;

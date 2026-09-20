@@ -9,4 +9,4 @@ __all__ = ["AuditLog", "Dataset", "Customer", "CustomerChannel", "CustomerEvent"
 from app.models.segments import Segment, SegmentRevision
 from app.models.ai import AIActionProposal, AIExecutionLog
 from app.models.campaigns import (Campaign, CampaignVariant, CampaignExclusion, PolicySetting,
-    CampaignDelivery, ValidationRun, ValidationRecipient, Approval)
+    CampaignDelivery, CampaignRun, CampaignEvent, ValidationRun, ValidationRecipient, Approval)

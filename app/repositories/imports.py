@@ -28,7 +28,7 @@ def earliest_activity(session, dataset_id, model, timestamp):
 def customers_and_totals(session, dataset_id, reference_at, customer_ids):
     query = select(Customer).where(Customer.dataset_id == dataset_id)
     aggregate = select(Order.customer_id, func.count(Order.id), func.sum(Order.amount), func.max(Order.purchased_at)).where(
-        Order.dataset_id == dataset_id, Order.status == "COMPLETED", Order.purchased_at <= reference_at)
+        Order.dataset_id == dataset_id, Order.source == 'UPLOADED', Order.status == "COMPLETED", Order.purchased_at <= reference_at)
     if customer_ids is not None:
         query = query.where(Customer.id.in_(customer_ids))
         aggregate = aggregate.where(Order.customer_id.in_(customer_ids))

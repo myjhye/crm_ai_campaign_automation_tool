@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 $pythonPath = Join-Path $projectRoot '.venv\Scripts\python.exe'
 $browserJob = $null
+$workerProcess = $null
 $exitCode = 0
 Push-Location -LiteralPath $projectRoot
 try {
@@ -53,7 +54,9 @@ try {
         }
     }
     Write-Host "GrowthPilot: $appUrl"
-    Write-Host 'Press Ctrl+C in this terminal to stop the API. PostgreSQL remains running.'
+    $workerProcess = Start-Process -FilePath $pythonPath -ArgumentList @('-m', 'app.workers.runner') -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru
+    Write-Host "Worker started (PID $($workerProcess.Id))."
+    Write-Host 'Press Ctrl+C in this terminal to stop the API and worker. PostgreSQL remains running.'
     & $pythonPath -m uvicorn app.main:app --reload --host 127.0.0.1 --port $Port
     $exitCode = $LASTEXITCODE
 } catch {
@@ -64,6 +67,9 @@ try {
         Stop-Job -Job $browserJob -ErrorAction SilentlyContinue
         Receive-Job -Job $browserJob -ErrorAction SilentlyContinue
         Remove-Job -Job $browserJob -Force -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $workerProcess -and -not $workerProcess.HasExited) {
+        Stop-Process -Id $workerProcess.Id -Force -ErrorAction SilentlyContinue
     }
     Pop-Location
 }

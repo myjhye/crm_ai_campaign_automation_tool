@@ -7,7 +7,7 @@ from app.models.customers import Customer, CustomerChannel, Order, OrderItem, Pr
 def customer_snapshot(dataset_id, reference):
     orders = select(Order.customer_id, func.count().label("order_count"), func.sum(Order.amount).label("amount"),
                     func.max(Order.purchased_at).label("last_purchase_at")).where(
-        Order.dataset_id == dataset_id, Order.status == "COMPLETED", Order.purchased_at < reference).group_by(Order.customer_id).cte("historical_orders")
+        Order.dataset_id == dataset_id, Order.source == 'UPLOADED', Order.status == "COMPLETED", Order.purchased_at < reference).group_by(Order.customer_id).cte("historical_orders")
     last = func.coalesce(orders.c.last_purchase_at, Customer.signup_at)
     status = case((and_(Customer.withdrawn_at.is_not(None), Customer.withdrawn_at <= reference), "WITHDRAWN"),
                   (last <= reference - timedelta(days=60), "DORMANT"),
@@ -20,7 +20,7 @@ def customer_snapshot(dataset_id, reference):
 
 def period_orders(dataset_id, start, end):
     return select(Order.customer_id, func.count().label("count")).where(Order.dataset_id == dataset_id,
-        Order.status == "COMPLETED", Order.purchased_at >= start, Order.purchased_at < end).group_by(Order.customer_id).cte("period_orders")
+        Order.source == 'UPLOADED', Order.status == "COMPLETED", Order.purchased_at >= start, Order.purchased_at < end).group_by(Order.customer_id).cte("period_orders")
 
 
 def event_customers(dataset_id, start, end, kinds):
@@ -85,7 +85,7 @@ def preferred_category(session, dataset_id, customer_id, reference):
     return session.execute(select(Product.category, func.sum(OrderItem.amount).label("amount")).select_from(OrderItem).join(
         Order, and_(Order.id == OrderItem.order_id, Order.dataset_id == OrderItem.dataset_id)).join(
         Product, and_(Product.id == OrderItem.product_id, Product.dataset_id == OrderItem.dataset_id)).where(
-        OrderItem.dataset_id == dataset_id, Order.customer_id == customer_id, Order.status == "COMPLETED",
+        OrderItem.dataset_id == dataset_id, Order.customer_id == customer_id, Order.source == 'UPLOADED', Order.status == "COMPLETED",
         Order.purchased_at < reference).group_by(Product.category).order_by(func.sum(OrderItem.amount).desc(), Product.category).limit(1)).first()
 
 

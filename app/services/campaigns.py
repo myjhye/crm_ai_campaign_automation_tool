@@ -68,8 +68,10 @@ def archive(session, request, campaign_id, request_id):
         require_dataset(session,request.dataset_id,lock=True)
         row=repository.get(session,request.dataset_id,campaign_id,lock=True)
         if row is None: raise AppError('NOT_FOUND','캠페인을 찾을 수 없습니다.',404)
-        if row.status!='DRAFT' or row.version!=request.version:
-            raise AppError('VERSION_CONFLICT','작성 중인 최신 캠페인만 삭제할 수 있습니다.')
+        if row.version!=request.version:
+            raise AppError('VERSION_CONFLICT','캠페인이 변경되었습니다. 최신 내용을 불러온 뒤 다시 시도해주세요.')
+        if row.status=='RUNNING':
+            raise AppError('CAMPAIGN_RUNNING','모의 발송 중인 캠페인은 삭제할 수 없습니다.',409)
         previous=row.version; row.version+=1; row.archived_at=datetime.now(timezone.utc)
         record_change(session,dataset_id=row.dataset_id,resource_id=row.id,actor_type='VISITOR',action='CAMPAIGN_ARCHIVED',request_id=request_id,previous_version=previous,new_version=row.version)
         return {'id':row.id,'archived':True,'version':row.version}

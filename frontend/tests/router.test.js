@@ -17,6 +17,14 @@ test('shareable route preserves dataset, resource, dates, page and special searc
   assert.deepEqual(parseRoute(routeHash(route)), {...route, issues: []});
 });
 
+test('campaign tab is preserved and restricted to known workflow tabs', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const route = parseRoute(`#/campaigns/${id}?dataset=${id}&tab=results`);
+  assert.equal(route.tab, 'results');
+  assert.match(routeHash(route), /tab=results/);
+  assert.ok(parseRoute(`#/campaigns/${id}?dataset=${id}&tab=unknown`).issues.length);
+});
+
 test('invalid deep links are reported instead of silently selecting a different dataset', () => {
   for (const hash of ['#/missing', '#/data?dataset=bad', '#/data?page=-1', '#/data?page=Infinity', '#/data?from=2026-02-31', '#/customers/bad']) {
     assert.ok(parseRoute(hash).issues.length, hash);

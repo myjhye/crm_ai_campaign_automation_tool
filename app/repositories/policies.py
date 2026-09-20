@@ -19,12 +19,13 @@ def channels(session,dataset_id,customer_ids,channel):
     return {row.customer_id:row for row in rows}
 
 def delivery_counts(session,dataset_id,customer_ids,channel,campaign_id,day_start,week_start,reference):
+    exposure_at=func.coalesce(CampaignDelivery.sent_at,CampaignDelivery.created_at)
     rows=session.execute(select(CampaignDelivery.customer_id,
         func.count().filter(CampaignDelivery.campaign_id==campaign_id).label('duplicate'),
-        func.count().filter(CampaignDelivery.sent_at>=day_start).label('daily'),
-        func.count().filter(CampaignDelivery.sent_at>=week_start).label('weekly')).where(
+        func.count().filter(exposure_at>=day_start).label('daily'),
+        func.count().filter(exposure_at>=week_start).label('weekly')).where(
         CampaignDelivery.dataset_id==dataset_id,CampaignDelivery.customer_id.in_(customer_ids),CampaignDelivery.channel==channel,
-        CampaignDelivery.status=='SENT',CampaignDelivery.sent_at<reference).group_by(CampaignDelivery.customer_id)).all()
+        CampaignDelivery.status.in_(('RESERVED','SENT')),exposure_at<reference).group_by(CampaignDelivery.customer_id)).all()
     return {row.customer_id:(row.duplicate,row.daily,row.weekly) for row in rows}
 
 def latest_validation(session,dataset_id,campaign_id):

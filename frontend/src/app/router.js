@@ -30,6 +30,7 @@ export function parseRoute(hash, now) {
   const route = {view: parts[0] || 'overview', resource: parts[1] || '', dataset: params.get('dataset') || '',
     from: params.get('from') || defaults.from, to: params.get('to') || defaults.to,
     page: Number(params.get('page') || 1), q: params.get('q') || '', issues: []};
+  if (params.has('tab')) route.tab = params.get('tab');
   for (const key of ['status', 'cohort', 'sort', 'direction', 'signup_from', 'signup_to']) {
     if (params.has(key)) route[key] = params.get(key);
   }
@@ -41,12 +42,13 @@ export function parseRoute(hash, now) {
   if ((route.dataset && !isUUID(route.dataset)) || (route.resource && !isUUID(route.resource))) route.issues.push('주소의 데이터 식별자가 올바르지 않습니다.');
   if (!Number.isSafeInteger(route.page) || route.page < 1 || route.page > 1000000) route.issues.push('페이지 번호가 올바르지 않습니다.');
   if (route.q.length > 200) route.issues.push('검색어는 200자 이하로 입력해주세요.');
+  if (route.tab && !['compose','review','results'].includes(route.tab)) route.issues.push('존재하지 않는 캠페인 탭입니다.');
   try { apiPeriod(route.from, route.to); } catch { route.issues.push('조회 기간이 올바르지 않습니다.'); }
   return route;
 }
 export function routeHash(route) {
   const params = new URLSearchParams();
-  for (const key of ['dataset', 'from', 'to', 'q', 'status', 'cohort', 'sort', 'direction', 'signup_from', 'signup_to']) if (route[key]) params.set(key, route[key]);
+  for (const key of ['dataset', 'from', 'to', 'q', 'tab', 'status', 'cohort', 'sort', 'direction', 'signup_from', 'signup_to']) if (route[key]) params.set(key, route[key]);
   if (route.page > 1) params.set('page', route.page);
   return `#/${route.view}${route.resource ? `/${route.resource}` : ''}${params.size ? `?${params}` : ''}`;
 }

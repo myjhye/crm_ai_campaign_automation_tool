@@ -70,6 +70,7 @@ class Order(IdentityMixin, DatasetMixin, Base):
     purchased_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20))
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    source: Mapped[str] = mapped_column(String(20), default='UPLOADED', server_default='UPLOADED')
     __table_args__ = (
         ForeignKeyConstraint(["dataset_id", "customer_id"], ["customers.dataset_id", "customers.id"]),
         UniqueConstraint("dataset_id", "external_id", name="uq_order_external"),
@@ -77,6 +78,7 @@ class Order(IdentityMixin, DatasetMixin, Base):
         UniqueConstraint("dataset_id", "customer_id", "id", name="uq_order_customer_id"),
         CheckConstraint("amount >= 0", name="amount"),
         CheckConstraint("status IN ('COMPLETED','CANCELLED','REFUNDED')", name="status"),
+        CheckConstraint("source IN ('UPLOADED','SIMULATED')", name="source"),
         Index("ix_orders_customer_purchased", "customer_id", "purchased_at"),
     )
 

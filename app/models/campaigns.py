@@ -69,21 +69,79 @@ class PolicySetting(IdentityMixin, Base):
 
 
 class CampaignDelivery(IdentityMixin, Base):
-    """Policy exposure ledger. Stage 9 will attach run/result details."""
+    """Reserved and completed customer result for one campaign run."""
     __tablename__ = 'campaign_deliveries'
     dataset_id: Mapped[UUID] = mapped_column(ForeignKey('datasets.id'))
     campaign_id: Mapped[UUID]
     customer_id: Mapped[UUID]
+    run_id: Mapped[UUID | None]
+    variant_id: Mapped[UUID | None] = mapped_column(ForeignKey('campaign_variants.id'))
     channel: Mapped[str] = mapped_column(String(10))
     status: Mapped[str] = mapped_column(String(20))
+    exclusion_reason: Mapped[str | None] = mapped_column(String(50))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (
         ForeignKeyConstraint(['dataset_id','campaign_id'],['campaigns.dataset_id','campaigns.id']),
+        ForeignKeyConstraint(['dataset_id','run_id'],['campaign_runs.dataset_id','campaign_runs.id']),
         ForeignKeyConstraint(['dataset_id','customer_id'],['customers.dataset_id','customers.id']),
         UniqueConstraint('campaign_id','customer_id',name='uq_campaign_delivery_customer'),
         CheckConstraint("channel IN ('EMAIL','PUSH','SMS')",name='channel'),
-        CheckConstraint("status IN ('SENT','FAILED','EXCLUDED')",name='status'),
+        UniqueConstraint('run_id','customer_id',name='uq_campaign_run_customer'),
+        CheckConstraint("status IN ('RESERVED','SENT','FAILED','EXCLUDED')",name='status'),
         Index('ix_campaign_deliveries_customer_sent','dataset_id','customer_id','channel','sent_at'))
+
+
+class CampaignRun(IdentityMixin, Base):
+    __tablename__ = 'campaign_runs'
+    dataset_id: Mapped[UUID] = mapped_column(ForeignKey('datasets.id'))
+    campaign_id: Mapped[UUID]
+    approval_id: Mapped[UUID] = mapped_column(ForeignKey('approvals.id'))
+    validation_run_id: Mapped[UUID]
+    job_id: Mapped[UUID]
+    idempotency_key: Mapped[str] = mapped_column(String(200))
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default='PENDING', server_default='PENDING')
+    seed: Mapped[str] = mapped_column(String(64))
+    response_rates: Mapped[dict] = mapped_column(JSONB, default=dict, server_default='{}')
+    initial_count: Mapped[int] = mapped_column(Integer)
+    reserved_count: Mapped[int] = mapped_column(Integer)
+    excluded_count: Mapped[int] = mapped_column(Integer)
+    sent_count: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    failed_count: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        UniqueConstraint('dataset_id','id',name='uq_campaign_run_dataset'),
+        UniqueConstraint('campaign_id','idempotency_key',name='uq_campaign_run_idempotency'),
+        ForeignKeyConstraint(['dataset_id','campaign_id'],['campaigns.dataset_id','campaigns.id']),
+        ForeignKeyConstraint(['dataset_id','validation_run_id'],['validation_runs.dataset_id','validation_runs.id']),
+        ForeignKeyConstraint(['dataset_id','job_id'],['jobs.dataset_id','jobs.id']),
+        CheckConstraint("status IN ('PENDING','RUNNING','COMPLETED','FAILED')",name='status'),
+        CheckConstraint('initial_count >= 0 AND reserved_count >= 0 AND excluded_count >= 0 AND initial_count = reserved_count + excluded_count AND sent_count >= 0 AND failed_count >= 0',name='counts'))
+
+
+class CampaignEvent(IdentityMixin, Base):
+    __tablename__ = 'campaign_events'
+    dataset_id: Mapped[UUID] = mapped_column(ForeignKey('datasets.id'))
+    campaign_id: Mapped[UUID]
+    run_id: Mapped[UUID]
+    delivery_id: Mapped[UUID] = mapped_column(ForeignKey('campaign_deliveries.id'))
+    customer_id: Mapped[UUID]
+    variant_id: Mapped[UUID] = mapped_column(ForeignKey('campaign_variants.id'))
+    order_id: Mapped[UUID | None]
+    external_id: Mapped[str] = mapped_column(String(200))
+    event_type: Mapped[str] = mapped_column(String(30))
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source: Mapped[str] = mapped_column(String(20), default='SIMULATED', server_default='SIMULATED')
+    __table_args__ = (
+        ForeignKeyConstraint(['dataset_id','campaign_id'],['campaigns.dataset_id','campaigns.id']),
+        ForeignKeyConstraint(['dataset_id','run_id'],['campaign_runs.dataset_id','campaign_runs.id']),
+        ForeignKeyConstraint(['dataset_id','customer_id'],['customers.dataset_id','customers.id']),
+        ForeignKeyConstraint(['dataset_id','customer_id','order_id'],['orders.dataset_id','orders.customer_id','orders.id']),
+        UniqueConstraint('dataset_id','external_id',name='uq_campaign_event_external'),
+        CheckConstraint("event_type IN ('DELIVERED','OPEN','CLICK','CONVERSION','UNSUBSCRIBE')",name='event_type'),
+        CheckConstraint("source IN ('UPLOADED','SIMULATED')",name='source'),
+        Index('ix_campaign_events_campaign_time','campaign_id','event_at'))
 
 
 class ValidationRun(IdentityMixin, Base):

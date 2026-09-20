@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.models.datasets import AuditLog
 from app.services.imports import import_job
+from app.services.simulations import simulation_job
 
 
 class CheckPayload(BaseModel):
@@ -25,4 +26,4 @@ def system_check(session, job):
     return {"message": "worker check completed"}
 
 
-HANDLERS = {"system.check": system_check, "data.import": import_job}
+HANDLERS = {"system.check": system_check, "data.import": import_job, "campaign.simulate": simulation_job}

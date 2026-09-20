@@ -62,3 +62,9 @@ def fail(sessions, job, error_code):
             finished_at=func.clock_timestamp() if terminal else None,
             available_at=func.clock_timestamp() + timedelta(seconds=min(2 ** job.attempt, 60)),
         ))
+        if terminal and job.kind == 'campaign.simulate':
+            from uuid import UUID
+            from app.models.campaigns import CampaignRun
+            run=session.scalar(select(CampaignRun).where(CampaignRun.id==UUID(job.payload['run_id'])).with_for_update())
+            if run and run.status!='COMPLETED':
+                run.status='FAILED'; run.finished_at=func.clock_timestamp()

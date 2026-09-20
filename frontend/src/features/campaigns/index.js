@@ -130,9 +130,10 @@ export async function renderCampaigns(root, route, signal) {
   }
   fields.channel.addEventListener('change',channelChanged,{signal});
   populate(current);
+  let updateTabs=()=>{};
   const reviewFlow=campaignReview({route,signal,getCampaign:()=>current,onCampaign:value=>{
-    current=value; populate(current); form.inert=current.status!=='DRAFT'; submit.disabled=current.status!=='DRAFT';
-  }});
+    current=value; populate(current); form.inert=current.status!=='DRAFT'; submit.disabled=current.status!=='DRAFT';updateTabs();
+  },onRun:()=>refreshList(),getSegmentName:id=>segments.items.find(row=>row.revision_id===id)?.name});
   if (current) {try {await reviewFlow.load();} catch {reviewFlow.draw();}}
   form.addEventListener('submit', async event => {
     event.preventDefault(); if (busy) return;
@@ -188,27 +189,82 @@ export async function renderCampaigns(root, route, signal) {
     } finally {busy = false; submit.disabled = false; form.inert = false;}
   },{signal});
   const list = el('aside',{className:'card campaign-library','aria-label':'저장된 캠페인'});
+  const listNotice=el('p',{className:'small campaign-notice',role:'status'});
+  const announce=text=>{notice.textContent=text;listNotice.textContent=text;};
   async function deleteCampaign(row, control) {
-    if (row.status !== 'DRAFT') {notice.textContent='작성 중인 캠페인만 삭제할 수 있습니다.'; return;}
+    if (row.status === 'RUNNING') {announce('모의 발송 중인 캠페인은 삭제할 수 없습니다.'); return;}
     if (control.dataset.confirm !== 'true') {
-      control.dataset.confirm='true'; control.textContent='삭제 확인'; notice.textContent=`${row.name} 캠페인을 삭제하려면 삭제 확인을 한 번 더 눌러주세요.`; return;
+      control.dataset.confirm='true'; control.textContent='삭제 확인'; announce(`${row.name} 캠페인을 삭제하려면 삭제 확인을 한 번 더 눌러주세요.`); return;
     }
     control.disabled=true;
     try {
       await request(`/campaigns/${row.id}`,{method:'DELETE',body:{dataset_id:route.dataset,version:row.version},signal});
-      notice.textContent='캠페인이 삭제되었습니다.';
+      announce('캠페인이 삭제되었습니다.');
       if (current?.id===row.id) {
         current=null; populate(null); review.hidden=true; reviewFlow.draw();
         if (route.resource) {navigate({resource:'',page:1}); return;}
       }
       await refreshList();
-    } catch(error) {notice.textContent=errorMessage(error); control.disabled=false; control.dataset.confirm=''; control.textContent='삭제';}
+    } catch(error) {announce(errorMessage(error)); control.disabled=false; control.dataset.confirm=''; control.textContent='삭제';}
+  }
+  async function loadCampaignIntoWorkspace(row) {
+    current=await request(`/campaigns/${row.id}?dataset_id=${route.dataset}`,{signal,validate:validDetail});
+    populate(current);
+    await reviewFlow.load();
+    return current;
+  }
+  async function simulateFromList(row,control) {
+    if(row.status!=='APPROVED')return;
+    control.disabled=true;
+    notice.textContent=`${row.name} 캠페인의 모의 발송을 준비하고 있습니다.`;
+    try {
+      const campaign=await loadCampaignIntoWorkspace(row);
+      const started=await reviewFlow.simulate(campaign);
+      if(started) {
+        notice.textContent='모의 발송을 요청했습니다. 오른쪽 패널에서 진행 상황을 확인하세요.';
+        await refreshList();
+        navigate({view:'campaigns',resource:campaign.id,tab:'results'});
+      } else notice.textContent='모의 발송을 시작하지 못했습니다. 오른쪽 패널의 오류 내용을 확인해주세요.';
+    } catch(error) {
+      if(!signal.aborted)notice.textContent=errorMessage(error);
+    } finally {control.disabled=false;}
+  }
+  async function resumeFromList(row,control) {
+    control.disabled=true;
+    try {
+      const campaign=await loadCampaignIntoWorkspace(row);
+      await reviewFlow.resumeEditing(campaign);
+      notice.textContent='캠페인 편집을 다시 시작했습니다. 수정 후 정책 검수를 다시 실행해주세요.';
+      await refreshList();
+      navigate({view:'campaigns',resource:campaign.id,tab:'compose'});
+    } catch(error) {
+      if(!signal.aborted)notice.textContent=errorMessage(error);
+    } finally {control.disabled=false;}
+  }
+  const campaignStatusLabel=status=>({DRAFT:'작성 중',REVIEW:'승인 검토 중',APPROVED:'승인 완료',RUNNING:'모의 발송 중',COMPLETED:'발송 완료',FAILED:'발송 실패'}[status]||status);
+  function campaignActions(row) {
+    const actions=el('div',{className:'row campaign-library-actions'});
+    if(row.status==='APPROVED') {
+      const send=button('모의 발송',()=>simulateFromList(row,send),signal,'button campaign-action-primary');
+      const resume=button('편집 재개',()=>resumeFromList(row,resume),signal,'button secondary');
+      actions.append(send,resume);
+    } else if(row.status==='RUNNING') {
+      actions.append(el('span',{className:'badge status-running',text:'발송 진행 중'}),button('진행 상황 보기',()=>navigate({view:'campaigns',resource:row.id,tab:'results'}),signal,'button secondary'));
+    } else if(row.status==='COMPLETED') {
+      actions.append(el('span',{className:'campaign-action-status status-completed',text:'✓ 발송 완료'}),button('결과 보기',()=>navigate({view:'campaigns',resource:row.id,tab:'results'}),signal,'button secondary'));
+    } else {
+      actions.append(button(row.status==='DRAFT'?'편집':'검토 열기',()=>navigate({view:'campaigns',resource:row.id,tab:row.status==='DRAFT'?'compose':'review'}),signal));
+    }
+    const control=button('삭제',()=>deleteCampaign(row,control),signal,'button secondary campaign-delete');
+    control.disabled=row.status==='RUNNING';
+    if(control.disabled)control.title='모의 발송이 끝난 뒤 삭제할 수 있습니다.';
+    actions.append(control);
+    return actions;
   }
   function drawList(rows) {
-    list.replaceChildren(el('h2',{text:`캠페인 ${rows.total}개`}), ...rows.items.map(row =>
-      el('article',{className:'saved-segment'},el('h3',{text:row.name}),el('p',{className:'small muted',text:`${row.channel} · ${row.status === 'DRAFT' ? '작성 중' : row.status}`}),
-        el('div',{className:'row'},button('편집',() => navigate({view:'campaigns',resource:row.id}),signal),
-          (()=>{const control=button('삭제',()=>deleteCampaign(row,control),signal,'button secondary campaign-delete'); control.disabled=row.status!=='DRAFT'; return control;})()))),
+    list.replaceChildren(el('h2',{text:`캠페인 ${rows.total}개`}),listNotice, ...rows.items.map(row =>
+      el('article',{className:`saved-segment campaign-library-item status-${row.status.toLowerCase()}`},el('h3',{text:row.name}),
+        el('p',{className:'small muted',text:`${row.channel} · ${campaignStatusLabel(row.status)}`}),campaignActions(row))),
       button('이전',() => navigate({page:Math.max(1,(route.page||1)-1)}),signal),
       button('다음',() => {if ((route.page||1)*rows.page_size < rows.total) navigate({page:(route.page||1)+1});},signal));
   }
@@ -224,8 +280,24 @@ export async function renderCampaigns(root, route, signal) {
     },
     setBusy:value=>{busy=value;form.inert=value;submit.disabled=value;},
   });
-  root.replaceChildren(heading('Campaigns','세그먼트를 선택하고 채널별 A/B 캠페인을 준비하세요.',button('초기화',() => {
+  const defaultTab=current&&['APPROVED','RUNNING','COMPLETED'].includes(current.status)?'results':current?.status==='REVIEW'?'review':'compose';
+  const requestedTab=route.tab||defaultTab;
+  const selectedTab=requestedTab==='results'&&current&&!['APPROVED','RUNNING','COMPLETED'].includes(current.status)?'compose':requestedTab==='review'&&!current?'compose':requestedTab;
+  const tabList=el('nav',{className:'campaign-tabs','aria-label':'캠페인 작업 단계'});
+  const tabButtons=new Map();
+  for(const [id,label] of [['compose','작성'],['review','검수·승인'],['results','발송·결과']]){
+    const control=button(label,()=>navigate({view:'campaigns',resource:current?.id||'',tab:id}),signal,'button campaign-tab');
+    control.setAttribute('aria-current',selectedTab===id?'page':'false');tabButtons.set(id,control);tabList.append(control);
+  }
+  updateTabs=()=>{
+    tabButtons.get('review').disabled=!current;
+    tabButtons.get('results').disabled=!current||!['APPROVED','RUNNING','COMPLETED'].includes(current.status);
+  };updateTabs();
+  const composePanel=el('div',{className:'campaign-compose-tab',hidden:selectedTab==='compose'?null:''},el('div',{className:'campaign-compose-layout'},el('div',{className:'stack'},form,review),assistant));
+  reviewFlow.panel.hidden=selectedTab!=='review';reviewFlow.resultsPanel.hidden=selectedTab!=='results';
+  const activePanel=el('div',{className:'campaign-active-panel'},composePanel,reviewFlow.panel,reviewFlow.resultsPanel);
+  root.replaceChildren(heading('Campaigns','캠페인 작성부터 승인과 모의 발송 결과까지 관리하세요.',button('초기화',() => {
     if (route.resource) navigate({resource:''}); else {current = null; populate(null); notice.textContent = ''; review.hidden = true;}
-  },signal)), el('div',{className:'campaign-workspace'},el('div',{className:'stack'},form,review),el('div',{className:'stack campaign-sidebar'},assistant,reviewFlow.panel,list)));
+  },signal)),tabList,el('div',{className:'campaign-tab-workspace'},activePanel,list));
   if (!segments.total && !current) {submit.disabled = true; notice.append(stateCard('세그먼트가 필요합니다','대상 조건을 먼저 저장해주세요.',button('세그먼트 만들기',() => navigate({view:'segments',resource:''}),signal)));}
 }
