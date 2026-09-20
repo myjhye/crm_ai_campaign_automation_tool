@@ -56,3 +56,23 @@ def test_expired_coupon_blocks_campaign(campaign_context):
     campaign=client.put(f"/api/v1/campaigns/{campaign['id']}",json=update).json()
     run=client.post(f"/api/v1/campaigns/{campaign['id']}/validate",json={'dataset_id':payload['dataset_id'],'campaign_version':2,'reference_at':reference.isoformat()}).json()
     assert run['passed'] is False and run['blockers'][0]['rule_code']=='EXPIRED_COUPON'
+
+def test_ai_validation_tool_records_result_without_approval(campaign_context,database):
+    from sqlalchemy import select
+    from app.models.datasets import AuditLog
+    from app.models.campaigns import ValidationRun
+    client,payload,campaign,reference=campaign_context
+    body={'dataset_id':payload['dataset_id'],'from':'2026-08-19T00:00:00Z','to':reference.isoformat(),
+        'reference_at':reference.isoformat(),'prompt':'선택한 캠페인을 정책 검수해줘',
+        'validation_campaign_id':campaign['id'],'validation_campaign_version':campaign['version']}
+    response=client.post('/api/v1/ai/chat',json=body)
+    assert response.status_code==200,response.text
+    result=response.json()
+    assert result['result_type']=='campaign_validation' and result['data']['campaign_id']==campaign['id']
+    assert result['data']['initial_count']==result['data']['eligible_count']+result['data']['excluded_count']
+    review=client.get(f"/api/v1/campaigns/{campaign['id']}/review",params={'dataset_id':payload['dataset_id']}).json()
+    assert review['campaign']['status']=='DRAFT' and review['approval'] is None
+    with database.sessions() as session:
+        assert session.scalar(select(ValidationRun).where(ValidationRun.id==result['data']['id'])) is not None
+        audit=session.scalar(select(AuditLog).where(AuditLog.resource_id==campaign['id'],AuditLog.action=='CAMPAIGN_VALIDATED').order_by(AuditLog.created_at.desc()))
+        assert audit.actor_type=='AI'

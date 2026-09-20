@@ -13,6 +13,7 @@ from app.repositories.imports import data_version
 from app.schemas.segments import PreviewRequest, SegmentWrite
 from app.services import segments, analytics
 from app.services.datasets import require_dataset
+from app.schemas.policies import ValidationRequest
 
 
 def payload_hash(payload):
@@ -25,19 +26,38 @@ def chat(database, settings, query, request_id, provider=None):
         return propose(database,settings,query,request_id,provider)
     started = time.monotonic()
     # Close all transactions before waiting for the model.
+    validation_campaign = None
     with database.sessions() as session:
         require_dataset(session, query.dataset_id)
         version = data_version(session, query.dataset_id)
+        if query.validation_campaign_id:
+            from app.services.campaigns import detail
+            validation_campaign = detail(session, query.dataset_id, query.validation_campaign_id)
+            if validation_campaign['status'] != 'DRAFT' or validation_campaign['version'] != query.validation_campaign_version:
+                raise AppError('VERSION_CONFLICT', '작성 중인 최신 캠페인만 검수할 수 있습니다.')
     status, name, tokens = 'FAILED', None, 0
     try:
         prompt = safe_prompt(query.prompt)
         provider = provider or (MockProvider() if settings.ai_mode == 'mock' else OpenAIProvider(settings))
-        name, args, tokens = provider.plan(prompt, {'from': query.start.isoformat(), 'to': query.end.isoformat(), 'reference_at': query.reference_at.isoformat()})
-        allowed = {'get_metric': {'metric'}, 'preview_segment': {'condition_json'}, 'create_segment_draft': {'name', 'condition_json'}, 'clarify': {'question'}}
+        context = {'from': query.start.isoformat(), 'to': query.end.isoformat(), 'reference_at': query.reference_at.isoformat()}
+        if validation_campaign:
+            context['validation_campaign'] = {key: validation_campaign[key] for key in ('id','name','channel','status','version')}
+        name, args, tokens = provider.plan(prompt, context)
+        allowed = {'get_metric': {'metric'}, 'preview_segment': {'condition_json'}, 'create_segment_draft': {'name', 'condition_json'},
+                   'clarify': {'question'}, 'validate_campaign': set()}
         if name not in allowed or not isinstance(args, dict) or set(args) != allowed[name]:
             raise ValueError('Invalid tool')
         with database.sessions() as session:
-            if name == 'get_metric':
+            if name == 'validate_campaign':
+                if not validation_campaign: raise ValueError('Campaign context required')
+                from app.services import policies
+                parsed = ValidationRequest(dataset_id=query.dataset_id, campaign_version=query.validation_campaign_version,
+                    reference_at=query.reference_at)
+                result = policies.validate(session, query.validation_campaign_id, parsed, request_id, actor_type='AI')
+                result['campaign_name'] = validation_campaign['name']
+                kind, message = 'campaign_validation', ('정책 검수를 통과했습니다. 승인 여부는 캠페인 화면에서 결정해주세요.'
+                    if result['passed'] else '정책 검수에서 제외 대상 또는 차단 사유를 확인했습니다.')
+            elif name == 'get_metric':
                 if args['metric'] not in METRICS: raise ValueError('Invalid metric')
                 result = analytics.overview(session, query.model_copy(update={'data_version': version}))
                 result['metrics'] = {args['metric']: result['metrics'][args['metric']]}
@@ -75,7 +95,7 @@ def chat(database, settings, query, request_id, provider=None):
         with database.sessions.begin() as session:
             session.add(AIExecutionLog(dataset_id=query.dataset_id, request_id=request_id,
                 provider=settings.ai_mode, model=settings.ai_model if settings.ai_mode == 'live' else 'fixture',
-                status=status, tool_name=name if name in ('get_metric', 'preview_segment', 'create_segment_draft', 'clarify') else None,
+                status=status, tool_name=name if name in ('get_metric', 'preview_segment', 'create_segment_draft', 'clarify', 'validate_campaign') else None,
                 elapsed_ms=int((time.monotonic() - started) * 1000), total_tokens=tokens))
 
 

@@ -50,6 +50,16 @@ class ChatRequest(AnalyticsQuery):
     campaign_setup: CampaignSetup | None = None
     campaign_id: UUID | None = None
     campaign_version: int | None = Field(default=None,ge=1,strict=True)
+    validation_campaign_id: UUID | None = None
+    validation_campaign_version: int | None = Field(default=None, ge=1, strict=True)
+
+    @model_validator(mode='after')
+    def validation_context(self):
+        if (self.validation_campaign_id is None) != (self.validation_campaign_version is None):
+            raise ValueError('검수 캠페인 ID와 버전을 함께 입력해주세요.')
+        if self.validation_campaign_id and (self.campaign_id or self.campaign_brief or self.campaign_setup):
+            raise ValueError('캠페인 생성과 검수를 한 요청에 함께 지정할 수 없습니다.')
+        return self
 
 
 class Confirmation(BaseModel):

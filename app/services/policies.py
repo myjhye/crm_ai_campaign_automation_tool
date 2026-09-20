@@ -63,7 +63,7 @@ def review(session,dataset_id,campaign_id):
     validation=repository.latest_validation(session,dataset_id,campaign_id); approval=repository.latest_approval(session,dataset_id,campaign_id)
     return {'campaign':representation(session,campaign),'validation':validation_repr(validation) if validation else None,'approval':approval_repr(approval)}
 
-def validate(session,campaign_id,payload,request_id):
+def validate(session,campaign_id,payload,request_id,*,actor_type='VISITOR'):
     with session.begin():
         require_dataset(session,payload.dataset_id,lock=True)
         campaign=campaigns_repository.get(session,payload.dataset_id,campaign_id,True)
@@ -110,7 +110,7 @@ def validate(session,campaign_id,payload,request_id):
         session.add(run); session.flush()
         for row in recipients: row.validation_run_id=run.id
         session.add_all(recipients)
-        record_change(session,dataset_id=payload.dataset_id,resource_id=campaign.id,actor_type='VISITOR',action='CAMPAIGN_VALIDATED',request_id=request_id,previous_version=campaign.version,new_version=campaign.version)
+        record_change(session,dataset_id=payload.dataset_id,resource_id=campaign.id,actor_type=actor_type,action='CAMPAIGN_VALIDATED',request_id=request_id,previous_version=campaign.version,new_version=campaign.version)
         return validation_repr(run)
 
 def request_approval(session,campaign_id,payload,request_id):

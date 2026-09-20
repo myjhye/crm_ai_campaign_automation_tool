@@ -34,3 +34,15 @@ def test_privacy_and_ambiguous_mock():
     for prompt in ['a@example.com', '010-1234-5678', 'sk-secret']:
         with pytest.raises(AppError): safe_prompt(prompt)
     assert MockProvider().plan('VIP 찾아줘', {})[0] == 'clarify'
+
+def test_campaign_validation_uses_the_only_bounded_tool(monkeypatch):
+    original=httpx.Client; captured=[]
+    def handler(request):
+        captured.append(json.loads(request.content))
+        return httpx.Response(200,json={'status':'completed','output':[{'type':'function_call','name':'validate_campaign','arguments':'{}'}]})
+    monkeypatch.setattr(httpx,'Client',lambda **kw:original(transport=httpx.MockTransport(handler),**kw))
+    provider=OpenAIProvider(Settings(_env_file=None,openai_api_key='test'))
+    context={'validation_campaign':{'id':'campaign','name':'검수 캠페인','channel':'EMAIL','status':'DRAFT','version':1}}
+    assert provider.plan('검수해줘',context)[0:2]==('validate_campaign',{})
+    assert [tool['name'] for tool in captured[0]['tools']]==['validate_campaign']
+    assert captured[0]['tools'][0]['parameters']['properties']=={}

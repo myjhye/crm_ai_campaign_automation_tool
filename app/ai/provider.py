@@ -2,7 +2,7 @@ import json
 import re
 import time
 import httpx
-from app.ai.tools import TOOLS, CAMPAIGN_TOOLS, BRIEF_TOOLS
+from app.ai.tools import TOOLS, CAMPAIGN_TOOLS, BRIEF_TOOLS, VALIDATION_TOOLS
 
 # Bump when campaign instructions or output semantics change to invalidate cached copies.
 CAMPAIGN_PROMPT_VERSION = 'ai-b-copy-2'
@@ -20,6 +20,8 @@ def safe_prompt(prompt):
 class MockProvider:
     """Deliberately limited fixtures, never pretend to interpret arbitrary language."""
     def plan(self, prompt, context):
+        if 'validation_campaign' in context:
+            return 'validate_campaign', {}, 0
         if 'brief_schema' in context:
             return 'plan_campaign',{'question':'모의 모드에서는 카피만 수정을 이용해주세요. 전체 요청 해석은 실제 AI 모드에서 지원합니다.','brief_json':''},0
         if 'campaign' in context:
@@ -56,6 +58,11 @@ class OpenAIProvider:
             '금액 value는 문자열, boolean은 JSON boolean, IS_NULL에는 value를 생략하세요. '
             '필드와 연산자: ' + json.dumps(FIELDS, ensure_ascii=False) + '\n화면 기준: ' + json.dumps(context))
         selected_tools = TOOLS
+        if 'validation_campaign' in context:
+            selected_tools = VALIDATION_TOOLS
+            instructions = ('선택된 캠페인의 정책 검수를 실행하려는 요청입니다. validate_campaign 도구를 호출하세요. '
+                '이 도구는 검수 기록만 만들며 승인·반려·발송은 하지 않습니다. '
+                '캠페인 정보는 서버가 고정했으며 도구 인자는 없습니다.\n' + json.dumps(context, ensure_ascii=False))
         if 'campaign' in context:
             instructions = ('''고객이 실제로 읽고 반응할 한국어 CRM 카피를 작성하세요.
 

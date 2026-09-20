@@ -41,3 +41,27 @@ test('AI preview requires confirmation and renders a saved result', async ({page
   await expect(page.locator('.ai-message-system')).toContainText('대화를 새로 시작합니다');
   await expect(page.locator('.ai-message-user')).toHaveCount(0);
 });
+
+test('AI campaign validation renders policy counts and opens the approval screen', async ({page}) => {
+  const campaign='33333333-3333-4333-8333-333333333333';
+  const dataset={id,name:'체험용 확장 샘플',source:'DEMO',purpose:'ANALYSIS',customer_count:300,order_count:900,event_count:6000,version:1,created_at:'2026-09-19T00:00:00Z',updated_at:'2026-09-19T00:00:00Z',reference_at:'2026-09-19T00:00:00Z'};
+  let chatBody;
+  await page.route('**/api/v1/**',async route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path.endsWith('/status'))return route.fulfill({json:{mode:'mock',available:true}});
+    if(path.endsWith('/datasets'))return route.fulfill({json:{items:[dataset],total:1,page:1,page_size:100}});
+    if(path.endsWith('/campaigns'))return route.fulfill({json:{items:[{id:campaign,dataset_id:id,name:'휴면 VIP 재활성화',channel:'EMAIL',status:'DRAFT',version:2}],total:1,page:1,page_size:100}});
+    if(path.endsWith('/chat')){chatBody=route.request().postDataJSON();return route.fulfill({json:{message:'정책 검수를 통과했습니다.',mode:'mock',dataset_id:id,reference_at:dataset.reference_at,data_version:1,result_type:'campaign_validation',data:{id:proposal,campaign_id:campaign,campaign_name:'휴면 VIP 재활성화',initial_count:30,excluded_count:8,eligible_count:22,passed:true,rules:[{rule_code:'NO_CONSENT',affected_count:5,message:'채널 수신 미동의'},{rule_code:'INVALID_CONTACT',affected_count:3,message:'연락처 오류'}],blockers:[],expires_at:'2026-09-19T00:30:00Z'}}});}
+    return route.fulfill({status:404,json:{error:{message:'테스트 범위 밖'}}});
+  });
+  await page.goto('/#/data');
+  await page.locator('#ai-page-link').click();
+  await page.getByLabel('검수할 캠페인').selectOption(campaign);
+  await page.getByRole('button',{name:'전송',exact:true}).click();
+  await expect(page.getByText('승인 대상',{exact:true})).toBeVisible();
+  await expect(page.getByText('22',{exact:true})).toBeVisible();
+  expect(chatBody.validation_campaign_id).toBe(campaign);
+  expect(chatBody.validation_campaign_version).toBe(2);
+  await page.getByRole('button',{name:'캠페인 승인 화면 열기'}).click();
+  await expect(page).toHaveURL(new RegExp(`#/campaigns/${campaign}`));
+});

@@ -1,13 +1,19 @@
 import {test,expect} from '@playwright/test';
 const id='11111111-1111-4111-8111-111111111111', revision='22222222-2222-4222-8222-222222222222', campaign='33333333-3333-4333-8333-333333333333';
 test('campaign copy editor saves A/B, switches SMS and recovers conflict',async ({page}) => {
-  let saved=null, conflict=false;
+  let saved=null, conflict=false, validation=null;
   const dataset={id,name:'체험용 샘플',purpose:'ANALYSIS',source:'DEMO',customer_count:100,order_count:300,event_count:2000,version:1,reference_at:'2026-09-19T00:00:00Z',created_at:'2026-09-19T00:00:00Z',updated_at:'2026-09-19T00:00:00Z'};
   await page.route('**/api/v1/**',route => {
     const url=new URL(route.request().url()), method=route.request().method(), path=url.pathname;
     if(path.endsWith('/datasets')) return route.fulfill({json:{items:[dataset],total:1,page:1,page_size:100}});
     if(path.endsWith('/segments')) return route.fulfill({json:{items:[{id:revision,revision_id:revision,name:'휴면 VIP'}],total:1,page:1,page_size:100}});
     if(path.endsWith('/copy-policy')) return route.fulfill({json:{version:1,channels:{EMAIL:{subject_max:120,body_max:5000},PUSH:{subject_max:60,body_max:300},SMS:{subject_max:0,body_max:500}}}});
+    if(path.endsWith('/review')) return route.fulfill({json:{campaign:saved,validation,approval:null}});
+    if(path.endsWith('/validate')&&method==='POST') {
+      validation={id:revision,campaign_id:campaign,campaign_version:saved.version,initial_count:30,excluded_count:0,eligible_count:30,passed:true,
+        expires_at:'2099-09-20T05:33:00Z',blockers:[],rules:['WITHDRAWN','NO_CONSENT','INVALID_CONTACT','EXCLUDED_SEGMENT','DUPLICATE_CAMPAIGN','DAILY_LIMIT','WEEKLY_LIMIT'].map(rule_code=>({rule_code,affected_count:0,primary_count:0,message:rule_code}))};
+      return route.fulfill({status:201,json:validation});
+    }
     if(method==='DELETE') {saved=null; return route.fulfill({json:{id:campaign,archived:true,version:3}});}
     if(method==='POST'||method==='PUT') {
       if(conflict) return route.fulfill({status:409,json:{error:{message:'다른 방문자가 수정했습니다.'}}});
@@ -38,6 +44,14 @@ test('campaign copy editor saves A/B, switches SMS and recovers conflict',async 
   await page.getByLabel('A안 비율 (%)',{exact:true}).fill('50');
   await page.getByRole('button',{name:'초안 저장 후 확인'}).click();
   await expect(page.getByText('캠페인 초안이 저장되었습니다.',{exact:true})).toBeVisible();
+  await expect(page.getByText('아직 검수하지 않았습니다. 저장 후 검수를 실행해주세요.')).toBeVisible();
+  await page.getByRole('button',{name:'정책 검수 실행'}).click();
+  await expect(page.locator('.review-total')).toContainText('최초 대상30명');
+  await expect(page.locator('.review-reason-list li')).toHaveCount(7);
+  await expect(page.locator('.review-reason-list')).toContainText('채널 미동의0명');
+  await expect(page.locator('.review-eligible')).toContainText('승인 대상30명 ✓');
+  await expect(page.getByText('2099. 9. 20. 오후 2:33까지 유효')).toBeVisible();
+  await expect(page.getByRole('button',{name:'승인 요청'})).toBeEnabled();
   expect(saved.variants[0].allocation_bp).toBe(5000);
   expect(saved.brand_tone).toBe('다정하고 편안하게');
   expect(saved.exclusion_revision_ids).toEqual([]);

@@ -15,6 +15,10 @@ TOOLS = [
     tool('clarify', '모호한 조건, 다른 기간 요청 또는 미지원 업무의 확인 질문을 합니다.', {'question': {'type': 'string'}}),
 ]
 
+VALIDATION_TOOLS = [
+    tool('validate_campaign', '선택한 캠페인의 대상자와 카피 정책을 검수하고 검수 기록을 남깁니다.', {}),
+]
+
 COPY_PROPERTIES = {
     'variants': {'type':'array','items':{'type':'object','properties':{
         'variant_name':{'type':'string','enum':['A','B']}, 'subject':{'type':'string'},
