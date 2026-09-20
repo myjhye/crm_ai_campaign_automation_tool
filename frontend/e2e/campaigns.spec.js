@@ -44,6 +44,7 @@ test('campaign copy editor saves A/B, switches SMS and recovers conflict',async 
   await expect(page.getByLabel('A안 제목',{exact:true})).toBeDisabled();
   await page.getByRole('button',{name:'초안 저장 후 확인'}).click();
   await expect.poll(() => saved.channel).toBe('SMS');
+  await expect(page.locator('form.campaign-form')).not.toHaveAttribute('inert','');
   expect(saved.variants[0].subject).toBe('');
   conflict=true;
   await page.getByLabel('캠페인 이름',{exact:true}).fill('충돌 시 입력 유지');

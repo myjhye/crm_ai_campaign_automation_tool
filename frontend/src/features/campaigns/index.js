@@ -200,19 +200,7 @@ export async function renderCampaigns(root, route, signal) {
       notice.textContent='전체 초안이 입력되었습니다. 추천값을 검토한 뒤 저장해주세요.';
     },
     setBusy:value=>{busy=value;form.inert=value;submit.disabled=value;},
-    read:()=>{
-      const brief={};
-      for(const key of ['segment_revision_id','name','objective','channel','benefit','brand_tone','primary_kpi','target_value']) {
-        brief[key]=fields[key].value.trim();
-        if(!brief[key])throw new Error('메인 폼의 이름·목표·대상·채널·혜택·KPI를 먼저 입력해주세요.');
-      }
-      brief.coupon_expires_at=utcTime(fields.coupon_expires_at.value);
-      return {brief,fingerprint:fingerprint()};
-    },
-    apply:variants=>{
-      for(const variant of variants)for(const key of ['subject','body','hypothesis'])fields[`${variant.variant_name}_${key}`].value=variant[key];
-      review.hidden=true;notice.textContent='AI 카피가 입력되었습니다. 아직 저장되지 않았습니다.';
-    }});
+  });
   root.replaceChildren(heading('Campaigns','세그먼트를 선택하고 채널별 A/B 캠페인을 준비하세요.',button('초기화',() => {
     if (route.resource) navigate({resource:''}); else {current = null; populate(null); notice.textContent = ''; review.hidden = true;}
   },signal)), el('div',{className:'campaign-workspace'},el('div',{className:'stack'},form,review),el('div',{className:'stack campaign-sidebar'},assistant,list)));

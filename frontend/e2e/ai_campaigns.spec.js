@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 const id='11111111-1111-4111-8111-111111111111';
-test('campaign sidebar fills copy without saving and preserves input on failure',async({page})=>{
+test('campaign sidebar only offers full draft and fills without saving',async({page})=>{
   let writes=0,saved=null,fail=false;
   const dataset={id,name:'샘플',source:'DEMO',purpose:'ANALYSIS',customer_count:100,order_count:300,event_count:2000,version:1,created_at:'2026-09-19T00:00:00Z',updated_at:'2026-09-19T00:00:00Z',reference_at:'2026-09-19T00:00:00Z'};
   await page.route('**/api/v1/**',route=>{
@@ -14,28 +14,15 @@ test('campaign sidebar fills copy without saving and preserves input on failure'
     return route.fulfill({json:path.endsWith('/'+id)?saved:{items:[],total:0,page:1,page_size:20}});
   });
   await page.goto('/#/campaigns');
-  for(const [label,value] of [['캠페인 이름','재구매'],['캠페인 목표','재구매 증가'],['KPI 목표값','5'],['혜택','10% 할인']])await page.getByLabel(label,{exact:true}).fill(value);
-  await page.getByRole('group',{name:'대상 세그먼트',exact:true}).getByRole('checkbox',{name:'VIP',exact:true}).check();
-  await page.getByLabel('A안 비율 (%)',{exact:true}).fill('40');
-  await page.getByLabel('B안 비율 (%)',{exact:true}).fill('60');
-  await page.getByRole('button',{name:'AI로 A/B 카피 채우기'}).click();
-  await expect(page.getByLabel('A안 제목',{exact:true})).toHaveValue('A 혜택 안내');
-  await expect(page.getByLabel('A안 비율 (%)',{exact:true})).toHaveValue('40');
-  expect(writes).toBe(0);
-  fail=true;
-  await page.getByRole('button',{name:'AI로 A/B 카피 채우기'}).click();
-  await expect(page.getByText('생성 실패',{exact:true})).toBeVisible();
-  await expect(page.getByLabel('A안 제목',{exact:true})).toHaveValue('A 혜택 안내');
-  await page.getByRole('button',{name:'초안 저장 후 확인'}).click();
-  await expect(page.getByText('캠페인 초안이 저장되었습니다.',{exact:true})).toBeVisible();
-  expect(writes).toBe(1);expect(saved.variants[0].allocation_bp).toBe(4000);
+  await expect(page.getByRole('checkbox',{name:'카피만 수정',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'AI로 A/B 카피 채우기'})).toHaveCount(0);
+  let generations=0;
+  const expected={segment_revision_id:id,benefit:'15% 할인 쿠폰',brand_tone:'다정하고 편안하게',a_focus:'혜택 강조',b_focus:'관계 강조',target_value:'5'};
   await page.route('**/ai/campaign-plan',route=>{
     const setup=route.request().postDataJSON().campaign_setup;
-    expect(setup).toMatchObject({segment_revision_id:id,benefit:'15% 할인 쿠폰',brand_tone:'다정하고 편안하게',a_focus:'혜택 강조',b_focus:'관계 강조',target_value:'5'});
-    return route.fulfill({json:{result_type:'campaign_draft',segment_name:'VIP',notice:'추천값을 확인해주세요.',data:{...saved,name:'AI 전체 초안',variants:saved.variants}}});
+    expect(setup).toMatchObject(expected);generations++;
+    return route.fulfill({json:{cache_hit:generations>1,result_type:'campaign_draft',segment_name:'VIP',notice:'추천값을 확인해주세요.',data:{name:'AI 전체 초안',objective:setup.objective,channel:'EMAIL',benefit:setup.benefit,brand_tone:setup.brand_tone,primary_kpi:'conversion_rate',target_value:'5',segment_revision_id:id,variants:['A','B'].map(n=>({variant_name:n,subject:n,body:'Copy',hypothesis:'Test',allocation_bp:5000}))}}});
   });
-  await page.getByRole('checkbox',{name:'전체 초안 생성',exact:true}).check();
-  await expect(page.getByRole('checkbox',{name:'카피만 수정',exact:true})).not.toBeChecked();
   await expect(page.getByRole('button',{name:'초기화',exact:true})).toBeVisible();
   await page.getByLabel('AI 카피 요청').fill('');
   await page.getByRole('button',{name:'전체 초안 만들기',exact:true}).click();
@@ -48,7 +35,23 @@ test('campaign sidebar fills copy without saving and preserves input on failure'
   const toast=page.locator('.campaign-ai-success');
   await expect(toast).toBeVisible();
   await expect(toast).toHaveCount(0,{timeout:6000});
-  expect(writes).toBe(1);
+  expect(writes).toBe(0);
+  for(const [title,key,value] of [['목표','objective','감사 인사 전하기'],['공통 말투','brand_tone','담백한 편지처럼'],['A안 강조점','a_focus','감사 중심'],['B안 강조점','b_focus','탐색 중심']]){
+    const group=page.getByRole('group',{name:title,exact:true});
+    await group.getByRole('checkbox',{name:'기타 (직접 입력)',exact:true}).check();
+    await page.getByRole('button',{name:'전체 초안 만들기',exact:true}).click();
+    await expect(page.getByText(`${title}의 기타 내용을 입력해주세요.`,{exact:true})).toBeVisible();
+    await page.getByLabel(`${title} 기타 입력`,{exact:true}).fill(value);
+    expected[key]=value;
+  }
+  expect(generations).toBe(1);
+  await page.getByRole('button',{name:'전체 초안 만들기',exact:true}).click();
+  await expect(toast).toContainText('같은 설정의 이전 초안을 불러왔습니다.');
+  await expect(page.getByLabel('캠페인 목표',{exact:true})).toHaveValue('감사 인사 전하기');
+  await page.getByRole('group',{name:'공통 말투',exact:true}).getByRole('checkbox',{name:'다정하고 편안하게',exact:true}).check();
+  await expect(page.getByLabel('공통 말투 기타 입력',{exact:true})).toBeHidden();
+  await page.getByRole('group',{name:'공통 말투',exact:true}).getByRole('checkbox',{name:'기타 (직접 입력)',exact:true}).check();
+  await expect(page.getByLabel('공통 말투 기타 입력',{exact:true})).toHaveValue('담백한 편지처럼');
   await page.screenshot({path:'test-results/ai-campaigns.png',fullPage:true});
   await page.goto('/#/ai');
   await expect(page.getByText('캠페인 생성·카피 변경 설정',{exact:true})).toHaveCount(0);
