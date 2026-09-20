@@ -37,18 +37,18 @@ def test_preview_nulls_groups_and_profile(context):
         assert response.status_code == 200, response.text
         return response.json()
     all_rows = preview(condition(value=0))
-    assert all_rows['count'] == 100 and all_rows['warnings'] == ['BROAD_SEGMENT']
+    assert all_rows['count'] == 300 and all_rows['warnings'] == ['BROAD_SEGMENT']
     assert all_rows['profile']['average_purchase_amount'] is not None
     no_purchase = preview(missing)
     purchased = preview({'field':'days_since_last_purchase','comparison':'IS_NOT_NULL'})
-    assert no_purchase['count'] + purchased['count'] == 100
+    assert no_purchase['count'] + purchased['count'] == 300
     both = preview({'operator':'OR','conditions':[condition(),condition()]})
     assert both['count'] == purchased['count']
     empty = preview(condition('total_purchase_amount','GTE','999999999.00'))
     assert empty['count'] == 0 and empty['warnings'] == ['EMPTY_SEGMENT']
     assert empty['profile']['average_purchase_amount'] is None
     vip = preview({'operator':'AND','conditions':[condition('days_since_last_purchase','GTE',60), condition('total_purchase_amount','GTE','300000'),condition('email_consent','EQ',True)]})
-    assert vip['count'] > 0 and vip['count'] < 100
+    assert vip['count'] > 0 and vip['count'] < 300
     assert preview(condition('preferred_category','EQ','no-such-category'))['count'] == 0
     assert client.post('/api/v1/segments/preview',json={**base,'condition':condition(), 'data_version':999}).status_code == 409
 

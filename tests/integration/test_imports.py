@@ -182,9 +182,9 @@ def test_seed_is_deterministic_and_never_overwrites(database):
             return session.execute(select(Customer.external_id, Customer.order_count, Customer.total_purchase_amount,
                 Customer.last_purchase_at, Customer.status).where(Customer.dataset_id == id).order_by(Customer.external_id)).all()
         assert metrics(fresh.id) == metrics(dataset_id)
-        assert session.scalar(select(func.count()).select_from(Customer).where(Customer.dataset_id == dataset_id)) == 100
-        assert session.scalar(select(func.count()).select_from(Order).where(Order.dataset_id == dataset_id)) == 300
-        assert session.scalar(select(func.count()).select_from(CustomerEvent).where(CustomerEvent.dataset_id == dataset_id)) == 2000
+        assert session.scalar(select(func.count()).select_from(Customer).where(Customer.dataset_id == dataset_id)) == 300
+        assert session.scalar(select(func.count()).select_from(Order).where(Order.dataset_id == dataset_id)) == 900
+        assert session.scalar(select(func.count()).select_from(CustomerEvent).where(CustomerEvent.dataset_id == dataset_id)) == 6000
         vip = session.scalar(select(Customer).where(Customer.dataset_id == dataset_id, Customer.external_id == "customer-0"))
         assert vip.status == "DORMANT" and vip.total_purchase_amount >= 300000
 

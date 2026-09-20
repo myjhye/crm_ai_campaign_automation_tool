@@ -34,7 +34,7 @@ def test_ai_metric_and_confirm_idempotency(ai_context, database):
     response = client.post('/api/v1/ai/chat', json={**base,'prompt':PROMPT})
     assert response.status_code == 200, response.text
     data = response.json()['data']
-    assert data['count'] == 10
+    assert data['count'] == 30
     with database.sessions() as session: assert session.scalar(select(func.count()).select_from(Segment)) == 0
     path = f"/api/v1/ai/actions/{data['proposal_id']}/confirm"
     first = client.post(path, json={'dataset_id':base['dataset_id']})

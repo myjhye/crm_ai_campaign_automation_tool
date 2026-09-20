@@ -12,18 +12,19 @@ from app.core.config import Settings
 from app.core.time import as_utc
 from app.db.session import Database
 from app.models.datasets import Dataset
+from app.models.customers import Customer, CustomerChannel
 from app.models.jobs import DatasetVersion
 from app.schemas.imports import SCHEMAS
 from app.services.audit import record_change
 from app.services.imports import plan_merge, apply_merge
 
-GENERATOR_VERSION = "v1"
+GENERATOR_VERSION = "v2"
 GROUPS = ["dormant_vip", "cart_abandon", "no_consent", "withdrawn", "hard_bounce",
           "missing_contact", "mobile_drop", "recent", "no_purchase", "repeat"]
 
 
 def source_rows(seed, reference_at, size):
-    count = 100 if size == "small" else 10000
+    count = 300 if size == "small" else 10000
     product_count = 10 if size == "small" else 300
     offset = int(hashlib.sha256(str(seed).encode()).hexdigest()[:8], 16)
     customers = []
@@ -77,7 +78,7 @@ def seed_demo(session, *, seed, reference_at, size="small", dataset_key="default
     existing = session.get(Dataset, dataset_id)
     if existing:
         return existing, False
-    name = "체험용 소형 샘플" if size == "small" else "체험용 전체 샘플"
+    name = "체험용 확장 샘플 (고객 300명)" if size == "small" else "체험용 전체 샘플"
     dataset = Dataset(id=dataset_id, name=name, source="DEMO", reference_at=reference_at)
     session.add(dataset)
     session.flush()
@@ -90,6 +91,27 @@ def seed_demo(session, *, seed, reference_at, size="small", dataset_key="default
         if summary["error_count"]:
             raise ValueError(f"Invalid generated {kind}: {summary['errors']}")
         apply_merge(session, dataset.id, kind, mutations, reference_at)
+    # CSV customer import creates EMAIL. Add deterministic PUSH/SMS states so every
+    # channel can demonstrate eligible, opt-out, missing and invalid recipients.
+    customers = session.scalars(select(Customer).where(Customer.dataset_id == dataset.id).order_by(Customer.external_id)).all()
+    channel_rows = {(row.customer_id, row.channel): row for row in session.scalars(
+        select(CustomerChannel).where(CustomerChannel.dataset_id == dataset.id, CustomerChannel.channel.in_(("PUSH", "SMS"))))}
+    for customer in customers:
+        number = int(customer.external_id.rsplit("-", 1)[-1])
+        group = number % 10
+        values = {
+            "PUSH": dict(consent=group not in (2, 8), contact=None if group == 5 else f"push-token-{number}",
+                         is_valid=group not in (4, 5), hard_bounce=group == 4),
+            "SMS": dict(consent=group not in (2, 6), contact=None if group == 5 else f"0100000{number:04d}",
+                        is_valid=group not in (4, 5), hard_bounce=False),
+        }
+        for channel, state in values.items():
+            row = channel_rows.get((customer.id, channel))
+            if row is None:
+                row = CustomerChannel(dataset_id=dataset.id, customer_id=customer.id, channel=channel)
+                session.add(row)
+            for key, value in state.items(): setattr(row, key, value)
+            row.consent_changed_at = reference_at - timedelta(days=365)
     session.add(DatasetVersion(dataset_id=dataset.id, version=1, reason=f"seed:{GENERATOR_VERSION}"))
     record_change(session, dataset_id=dataset.id, resource_id=dataset.id, actor_type="SYSTEM",
                   action="DEMO_SEEDED", request_id=None, previous_version=None, new_version=1)
