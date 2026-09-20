@@ -3,6 +3,9 @@ import re
 import time
 import httpx
 from app.ai.tools import TOOLS, CAMPAIGN_TOOLS, BRIEF_TOOLS
+
+# Bump when campaign instructions or output semantics change to invalidate cached copies.
+CAMPAIGN_PROMPT_VERSION = 'ai-b-copy-2'
 from app.domain.segments.fields import FIELDS
 from app.core.errors import AppError
 

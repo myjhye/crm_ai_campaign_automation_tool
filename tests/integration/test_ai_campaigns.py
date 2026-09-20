@@ -16,6 +16,53 @@ from scripts.seed_demo import seed_demo
 pytestmark=pytest.mark.postgres
 
 
+def test_custom_setup_cache_reuses_copy_and_invalidates(context,database,monkeypatch):
+    from app.models.ai import AICopyCache, AIExecutionLog
+    from app.models.jobs import DatasetVersion
+    from app.ai import campaigns as ai_campaigns
+    client,app,base,brief=context
+    class CountingProvider(MockProvider):
+        calls=0
+        def plan(self,prompt,context):
+            self.calls+=1
+            assert context['campaign']['objective']=='장기 고객에게 감사 전하기'
+            assert context['campaign']['brand_tone']=='담백한 편지처럼'
+            assert 'A안: 감사 인사 중심' in prompt
+            name,args,_=super().plan(prompt,context)
+            args['variants'][0]['subject']=f'Copy {chr(64+self.calls)}'
+            return name,args,12
+    provider=CountingProvider();app.state.ai_provider=provider
+    setup={'segment_revision_id':brief['segment_revision_id'],'benefit':'15% 할인 쿠폰',
+        'objective':'장기 고객에게 감사 전하기','brand_tone':'담백한 편지처럼',
+        'a_focus':'감사 인사 중심','b_focus':'방문 초대 중심'}
+    def generate(**changes):
+        response=client.post('/api/v1/ai/campaign-plan',json={**base,'campaign_setup':{**setup,**changes}})
+        assert response.status_code==200,response.text
+        return response.json()
+    first=generate();second=generate()
+    assert not first['cache_hit'] and second['cache_hit'] and provider.calls==1
+    assert first['data']['variants']==second['data']['variants']
+    assert first['data']['proposal_id']!=second['data']['proposal_id']
+    # A confirmed/expired proposal is never itself reused as the new proposal.
+    with database.sessions.begin() as session:
+        session.get(AIActionProposal,UUID(first['data']['proposal_id'])).expires_at=datetime.now(timezone.utc)-timedelta(seconds=1)
+    assert generate()['cache_hit'] and provider.calls==1
+    assert not generate(b_focus='자유로운 탐색 초대')['cache_hit'] and provider.calls==2
+    with database.sessions.begin() as session:
+        version=session.scalar(select(func.max(DatasetVersion.version)).where(DatasetVersion.dataset_id==UUID(base['dataset_id']))) or 0
+        session.add(DatasetVersion(dataset_id=UUID(base['dataset_id']),version=version+1,reason='cache test'))
+    assert not generate()['cache_hit'] and provider.calls==3
+    monkeypatch.setattr(ai_campaigns,'CAMPAIGN_PROMPT_VERSION','ai-b-test-new')
+    assert not generate()['cache_hit'] and provider.calls==4
+    with database.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(Campaign))==0
+        assert session.scalar(select(func.count()).select_from(AICopyCache))==4
+        assert session.scalar(select(func.count()).select_from(AIExecutionLog).where(AIExecutionLog.total_tokens==0))==2
+    for field in ['objective','brand_tone','a_focus','b_focus']:
+        response=client.post('/api/v1/ai/campaign-plan',json={**base,'campaign_setup':{**setup,field:'   '}})
+        assert response.status_code==422
+
+
 def test_guided_setup_skips_llm_clarification_and_locks_settings(context):
     client,app,base,brief=context
     class GuidedProvider(MockProvider):

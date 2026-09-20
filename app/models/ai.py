@@ -6,6 +6,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base, IdentityMixin
 
 
+class AICopyCache(Base):
+    __tablename__ = 'ai_copy_cache'
+    cache_key: Mapped[str] = mapped_column(String(64),primary_key=True)
+    dataset_id: Mapped[UUID] = mapped_column(ForeignKey('datasets.id',ondelete='CASCADE'),index=True)
+    generated: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AIActionProposal(IdentityMixin, Base):
     __tablename__ = 'ai_action_proposals'
     dataset_id: Mapped[UUID] = mapped_column(ForeignKey('datasets.id'))

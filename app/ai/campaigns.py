@@ -11,8 +11,8 @@ from typing import Literal
 from uuid import UUID
 from sqlalchemy import select
 from app.core.errors import AppError
-from app.ai.provider import safe_prompt, MockProvider, OpenAIProvider
-from app.models.ai import AIActionProposal, AIExecutionLog
+from app.ai.provider import safe_prompt, MockProvider, OpenAIProvider, CAMPAIGN_PROMPT_VERSION
+from app.models.ai import AIActionProposal, AIExecutionLog, AICopyCache
 from app.repositories.imports import data_version
 from app.repositories import campaigns as repository
 from app.services import campaigns, segments
@@ -161,19 +161,32 @@ def propose(database, settings, query, request_id, provider=None):
         context={'operation':operation,'campaign':brief,'profile':profile,'copy_policy':policy,
             'reference_at':revision.reference_at.isoformat(),
             'coupon_expiry_display':next(iter(expiry_labels(base['coupon_expires_at'])),None)}
-        for attempt in range(2):
-            name,args,used_tokens=provider.plan(query.prompt,context)
-            tokens+=used_tokens
-            try:
-                if name!=operation: raise ValueError('요청한 카피 도구 결과가 아닙니다.')
-                generated,payload=validate_generated(args,base)
-                base=payload
-                break
-            except (ValueError,TypeError) as error:
-                reason='A/B 응답 형식이 올바르지 않습니다.' if isinstance(error,(ValidationError,TypeError)) else str(error)
-                if attempt:
-                    raise AppError('AI_INVALID_COPY',reason+' 자동 재생성도 실패했습니다. 입력 내용은 유지됩니다.',502) from None
-                context['validation_feedback']=reason+' 혜택 문구를 그대로 포함하고 허용되지 않은 숫자는 사용하지 마세요.'
+        cache_key=payload_hash({'dataset_id':str(query.dataset_id),'data_version':version,
+            'segment_revision_id':str(revision.id),'context':context,'prompt':query.prompt.strip(),
+            'settings':{k:v for k,v in base.items() if k!='variants'},
+            'provider':settings.ai_mode,'model':settings.ai_model,'implementation':type(provider).__qualname__,
+            'prompt_version':CAMPAIGN_PROMPT_VERSION,'policy_version':CURRENT_VERSION,
+            'max_output_tokens':settings.ai_max_output_tokens})
+        with database.sessions() as session:
+            cached=session.get(AICopyCache,cache_key)
+            cached_args=cached.generated if cached else None
+        cache_hit=cached_args is not None
+        if cache_hit:
+            generated,base=validate_generated(cached_args,base)
+        else:
+            for attempt in range(2):
+                name,args,used_tokens=provider.plan(query.prompt,context)
+                tokens+=used_tokens
+                try:
+                    if name!=operation: raise ValueError('요청한 카피 도구 결과가 아닙니다.')
+                    generated,payload=validate_generated(args,base)
+                    base=payload
+                    break
+                except (ValueError,TypeError) as error:
+                    reason='A/B 응답 형식이 올바르지 않습니다.' if isinstance(error,(ValidationError,TypeError)) else str(error)
+                    if attempt:
+                        raise AppError('AI_INVALID_COPY',reason+' 자동 재생성도 실패했습니다. 입력 내용은 유지됩니다.',502) from None
+                    context['validation_feedback']=reason+' 혜택 문구를 그대로 포함하고 허용되지 않은 숫자는 사용하지 마세요.'
         if campaign_version is not None: base['version'] = campaign_version
         with database.sessions.begin() as session:
             require_dataset(session,query.dataset_id,lock=True)
@@ -181,6 +194,15 @@ def propose(database, settings, query, request_id, provider=None):
             if query.campaign_id:
                 latest = repository.get(session,query.dataset_id,query.campaign_id,lock=True)
                 if latest.version != campaign_version or latest.status != 'DRAFT': raise AppError('VERSION_CONFLICT','캠페인이 변경되었습니다. 다시 생성해주세요.')
+            # Dataset lock serializes publication: simultaneous misses return the first valid copy.
+            winner=session.get(AICopyCache,cache_key)
+            if winner:
+                generated,validated=validate_generated(winner.generated,{k:v for k,v in base.items() if k!='version'})
+                base.update(validated)
+                cache_hit=True
+            else:
+                session.add(AICopyCache(cache_key=cache_key,dataset_id=query.dataset_id,
+                    generated=generated.model_dump(mode='json'),created_at=datetime.now(timezone.utc)))
             proposal = AIActionProposal(dataset_id=query.dataset_id,action_type='CAMPAIGN_COPY' if query.campaign_id else 'CAMPAIGN_CREATE',
                 campaign_id=query.campaign_id,payload=base,payload_hash=payload_hash(base),data_version=version,
                 policy_version=CURRENT_VERSION,expires_at=datetime.now(timezone.utc)+timedelta(minutes=30))
@@ -189,13 +211,13 @@ def propose(database, settings, query, request_id, provider=None):
                 'operation':operation,'source_version':campaign_version,'profile':profile}
         status='SUCCESS'
         return {'message':'A/B 카피와 혜택을 확인한 뒤 적용해주세요.','result_type':'campaign_draft','data':result,
-            'mode':settings.ai_mode,'dataset_id':query.dataset_id,'reference_at':revision.reference_at,'data_version':version,'request_id':request_id}
+            'mode':settings.ai_mode,'cache_hit':cache_hit,'dataset_id':query.dataset_id,'reference_at':revision.reference_at,'data_version':version,'request_id':request_id}
     except (ValueError,TypeError,ValidationError):
         raise AppError('AI_INVALID_COPY','생성된 카피가 혜택 또는 채널 기준에 맞지 않습니다. 조건을 구체화해 다시 요청해주세요.',502) from None
     finally:
         with database.sessions.begin() as session:
             session.add(AIExecutionLog(dataset_id=query.dataset_id,request_id=request_id,provider=settings.ai_mode,
-                model=settings.ai_model if settings.ai_mode=='live' else 'fixture',prompt_version='ai-b-1',status=status,
+                model=settings.ai_model if settings.ai_mode=='live' else 'fixture',prompt_version=CAMPAIGN_PROMPT_VERSION,status=status,
                 tool_name=operation,elapsed_ms=int((time.monotonic()-started)*1000),total_tokens=tokens))
 
 

@@ -23,12 +23,12 @@ class CampaignSetup(BaseModel):
     segment_revision_id: UUID
     channel: Literal['EMAIL','PUSH','SMS'] = 'EMAIL'
     benefit: str = Field(min_length=1,max_length=1000)
-    objective: Literal['재구매 유도','첫 구매 유도','방문 유도'] = '재구매 유도'
-    brand_tone: Literal['다정하고 편안하게','간결하고 명확하게','차분하고 전문적으로'] = '다정하고 편안하게'
+    objective: str = Field(default='재구매 유도',min_length=1,max_length=500)
+    brand_tone: str = Field(default='다정하고 편안하게',min_length=1,max_length=200)
     primary_kpi: Literal['conversion_rate','click_rate','revenue'] = 'conversion_rate'
     target_value: str = '5.00'
-    a_focus: Literal['혜택 강조','관계 강조','상품 탐색 강조'] = '혜택 강조'
-    b_focus: Literal['혜택 강조','관계 강조','상품 탐색 강조'] = '관계 강조'
+    a_focus: str = Field(default='혜택 강조',min_length=1,max_length=200)
+    b_focus: str = Field(default='관계 강조',min_length=1,max_length=200)
 
     @model_validator(mode='after')
     def validate_target(self):
