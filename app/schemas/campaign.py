@@ -68,3 +68,9 @@ class CampaignUpdate(CampaignWrite):
 
 class CampaignList(Pagination):
     dataset_id: UUID
+
+
+class CampaignArchive(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    dataset_id: UUID
+    version: int = Field(ge=1, strict=True)

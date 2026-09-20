@@ -2,6 +2,7 @@ import {el, button, heading, errorMessage, stateCard} from '../../components/dom
 import {request, isUUID, isPage} from '../../api/client.js';
 import {navigate} from '../../app/router.js';
 import {campaignAssistant} from './ai.js';
+import {campaignReview} from './review.js';
 
 const validRow = r => isUUID(r?.id) && typeof r.name === 'string' && Number.isInteger(r.version);
 const validDetail = r => validRow(r) && Array.isArray(r.variants) && r.variants.length === 2 && Array.isArray(r.exclusion_revision_ids);
@@ -129,6 +130,10 @@ export async function renderCampaigns(root, route, signal) {
   }
   fields.channel.addEventListener('change',channelChanged,{signal});
   populate(current);
+  const reviewFlow=campaignReview({route,signal,getCampaign:()=>current,onCampaign:value=>{
+    current=value; populate(current); form.inert=current.status!=='DRAFT'; submit.disabled=current.status!=='DRAFT';
+  }});
+  if (current) {try {await reviewFlow.load();} catch {reviewFlow.draw();}}
   form.addEventListener('submit', async event => {
     event.preventDefault(); if (busy) return;
     if (!fields.segment_revision_id.value) {notice.textContent = '대상 세그먼트 1개를 체크해주세요.'; targetList.querySelector('input')?.focus(); return;}
@@ -155,6 +160,7 @@ export async function renderCampaigns(root, route, signal) {
       const saved = await request(current ? `/campaigns/${current.id}` : '/campaigns',{method:current?'PUT':'POST',body:payload,signal,validate:validDetail});
       current = saved;
       current = await request(`/campaigns/${saved.id}?dataset_id=${route.dataset}`,{signal,validate:validDetail});
+      try {await reviewFlow.load();} catch {reviewFlow.draw();}
       notice.textContent = '캠페인 초안이 저장되었습니다.';
       review.hidden = false;
       const actions=el('div',{className:'campaign-save-actions'},
@@ -182,10 +188,27 @@ export async function renderCampaigns(root, route, signal) {
     } finally {busy = false; submit.disabled = false; form.inert = false;}
   },{signal});
   const list = el('aside',{className:'card campaign-library','aria-label':'저장된 캠페인'});
+  async function deleteCampaign(row, control) {
+    if (row.status !== 'DRAFT') {notice.textContent='작성 중인 캠페인만 삭제할 수 있습니다.'; return;}
+    if (control.dataset.confirm !== 'true') {
+      control.dataset.confirm='true'; control.textContent='삭제 확인'; notice.textContent=`${row.name} 캠페인을 삭제하려면 삭제 확인을 한 번 더 눌러주세요.`; return;
+    }
+    control.disabled=true;
+    try {
+      await request(`/campaigns/${row.id}`,{method:'DELETE',body:{dataset_id:route.dataset,version:row.version},signal});
+      notice.textContent='캠페인이 삭제되었습니다.';
+      if (current?.id===row.id) {
+        current=null; populate(null); review.hidden=true; reviewFlow.draw();
+        if (route.resource) {navigate({resource:'',page:1}); return;}
+      }
+      await refreshList();
+    } catch(error) {notice.textContent=errorMessage(error); control.disabled=false; control.dataset.confirm=''; control.textContent='삭제';}
+  }
   function drawList(rows) {
     list.replaceChildren(el('h2',{text:`캠페인 ${rows.total}개`}), ...rows.items.map(row =>
       el('article',{className:'saved-segment'},el('h3',{text:row.name}),el('p',{className:'small muted',text:`${row.channel} · ${row.status === 'DRAFT' ? '작성 중' : row.status}`}),
-        button('편집',() => navigate({view:'campaigns',resource:row.id}),signal))),
+        el('div',{className:'row'},button('편집',() => navigate({view:'campaigns',resource:row.id}),signal),
+          (()=>{const control=button('삭제',()=>deleteCampaign(row,control),signal,'button secondary campaign-delete'); control.disabled=row.status!=='DRAFT'; return control;})()))),
       button('이전',() => navigate({page:Math.max(1,(route.page||1)-1)}),signal),
       button('다음',() => {if ((route.page||1)*rows.page_size < rows.total) navigate({page:(route.page||1)+1});},signal));
   }
@@ -203,6 +226,6 @@ export async function renderCampaigns(root, route, signal) {
   });
   root.replaceChildren(heading('Campaigns','세그먼트를 선택하고 채널별 A/B 캠페인을 준비하세요.',button('초기화',() => {
     if (route.resource) navigate({resource:''}); else {current = null; populate(null); notice.textContent = ''; review.hidden = true;}
-  },signal)), el('div',{className:'campaign-workspace'},el('div',{className:'stack'},form,review),el('div',{className:'stack campaign-sidebar'},assistant,list)));
+  },signal)), el('div',{className:'campaign-workspace'},el('div',{className:'stack'},form,review),el('div',{className:'stack campaign-sidebar'},assistant,reviewFlow.panel,list)));
   if (!segments.total && !current) {submit.disabled = true; notice.append(stateCard('세그먼트가 필요합니다','대상 조건을 먼저 저장해주세요.',button('세그먼트 만들기',() => navigate({view:'segments',resource:''}),signal)));}
 }

@@ -8,6 +8,7 @@ test('campaign copy editor saves A/B, switches SMS and recovers conflict',async 
     if(path.endsWith('/datasets')) return route.fulfill({json:{items:[dataset],total:1,page:1,page_size:100}});
     if(path.endsWith('/segments')) return route.fulfill({json:{items:[{id:revision,revision_id:revision,name:'휴면 VIP'}],total:1,page:1,page_size:100}});
     if(path.endsWith('/copy-policy')) return route.fulfill({json:{version:1,channels:{EMAIL:{subject_max:120,body_max:5000},PUSH:{subject_max:60,body_max:300},SMS:{subject_max:0,body_max:500}}}});
+    if(method==='DELETE') {saved=null; return route.fulfill({json:{id:campaign,archived:true,version:3}});}
     if(method==='POST'||method==='PUT') {
       if(conflict) return route.fulfill({status:409,json:{error:{message:'다른 방문자가 수정했습니다.'}}});
       saved={...route.request().postDataJSON(),id:campaign,version:(saved?.version||0)+1,status:'DRAFT'};
@@ -53,5 +54,10 @@ test('campaign copy editor saves A/B, switches SMS and recovers conflict',async 
   await expect(page.getByLabel('캠페인 이름',{exact:true})).toHaveValue('충돌 시 입력 유지');
   await page.getByRole('button',{name:'최신 내용 불러오기'}).click();
   await expect(page.getByLabel('캠페인 이름',{exact:true})).toHaveValue('재구매 캠페인');
+  conflict=false;
+  await page.getByRole('button',{name:'삭제',exact:true}).click();
+  await expect(page.getByRole('button',{name:'삭제 확인',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'삭제 확인',exact:true}).click();
+  await expect(page.getByText('캠페인 0개',{exact:true})).toBeVisible();
   await page.screenshot({path:'test-results/campaigns.png',fullPage:true});
 });

@@ -21,3 +21,5 @@ from app.api.routes import ai
 api_router.include_router(ai.router)
 from app.api.routes import campaigns
 api_router.include_router(campaigns.router)
+from app.api.routes import policies
+api_router.include_router(policies.router)

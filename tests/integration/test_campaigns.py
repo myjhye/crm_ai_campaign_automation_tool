@@ -71,3 +71,14 @@ def test_campaign_audit_failure_rolls_back(context,database,monkeypatch):
     with database.sessions() as session:
         assert session.scalar(select(func.count()).select_from(Campaign)) == 0
         assert session.scalar(select(func.count()).select_from(CampaignVariant)) == 0
+
+
+def test_campaign_archive_removes_it_from_public_list(context,database):
+    client,payload=context
+    created=client.post('/api/v1/campaigns',json=payload).json()
+    response=client.request('DELETE',f"/api/v1/campaigns/{created['id']}",json={'dataset_id':payload['dataset_id'],'version':created['version']})
+    assert response.status_code==200,response.text
+    assert response.json()['archived'] is True
+    assert client.get('/api/v1/campaigns',params={'dataset_id':payload['dataset_id']}).json()['total']==0
+    assert client.get(f"/api/v1/campaigns/{created['id']}",params={'dataset_id':payload['dataset_id']}).status_code==404
+    assert client.request('DELETE',f"/api/v1/campaigns/{created['id']}",json={'dataset_id':payload['dataset_id'],'version':created['version']}).status_code==404

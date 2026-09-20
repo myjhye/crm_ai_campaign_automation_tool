@@ -9,6 +9,7 @@ import {store} from './store.js';
 import {el, button, heading, loading, stateCard, errorMessage, formatTime} from '../components/dom.js';
 import {renderData} from '../features/data/index.js';
 import {renderOverview} from '../features/overview/index.js';
+import {renderSettings} from '../features/settings/index.js';
 
 const content = document.getElementById('content');
 const selector = document.getElementById('dataset-select');
@@ -71,6 +72,7 @@ async function render(route) {
     else if (route.view === 'customers' && selected) await renderCustomers(content, route, signal);
     else if (route.view === 'segments' && selected) await renderSegments(content, route, signal);
     else if (route.view === 'campaigns' && selected) await renderCampaigns(content, route, signal);
+    else if (route.view === 'settings' && selected) await renderSettings(content, route, signal);
     else if (route.resource) content.replaceChildren(heading(title, `리소스 ${route.resource}`), stateCard('상세 화면 준비 중', '주소의 리소스 ID는 유지됩니다. 이 업무의 상세 조회 API가 연결되면 내용을 표시합니다.', button('목록으로', () => navigate({resource: ''}), signal)));
     else if (route.view === 'overview' && selected) await renderDashboard(content, route, selected, signal);
     else if (route.view === 'overview') renderOverview(content, selected, page.total, signal);

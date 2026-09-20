@@ -3,8 +3,9 @@ from app.models.campaigns import Campaign, CampaignVariant, CampaignExclusion
 from app.models.segments import SegmentRevision
 
 
-def get(session, dataset_id, campaign_id, lock=False):
+def get(session, dataset_id, campaign_id, lock=False, include_archived=False):
     query = select(Campaign).where(Campaign.dataset_id == dataset_id, Campaign.id == campaign_id)
+    if not include_archived: query = query.where(Campaign.archived_at.is_(None))
     return session.scalar(query.with_for_update() if lock else query)
 
 
@@ -13,9 +14,9 @@ def revisions(session, dataset_id, ids):
 
 
 def page(session, query):
-    where = Campaign.dataset_id == query.dataset_id
-    total = session.scalar(select(func.count()).select_from(Campaign).where(where))
-    rows = session.scalars(select(Campaign).where(where).order_by(Campaign.created_at.desc(), Campaign.id).offset(query.offset).limit(query.page_size)).all()
+    where = (Campaign.dataset_id == query.dataset_id, Campaign.archived_at.is_(None))
+    total = session.scalar(select(func.count()).select_from(Campaign).where(*where))
+    rows = session.scalars(select(Campaign).where(*where).order_by(Campaign.created_at.desc(), Campaign.id).offset(query.offset).limit(query.page_size)).all()
     return rows, total
 
 

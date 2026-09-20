@@ -288,7 +288,7 @@ AI 테이블은 기존 008 일괄 추가안 대신 AI-A에서 004 세그먼트 �
 ### 3-3. 샘플 생성기
 
 - [x] `scripts/seed_demo.py`에 `--seed`, `--reference-at`, `--size small|demo`, 새 복사본용 `--dataset-key`를 제공한다.
-- [x] small은 고객 100·주문 300·이벤트 2,000건, demo는 고객 1만·주문 3만·이벤트 20만 건을 생성한다. 이벤트 수는 주문 연결 PURCHASE를 포함한다.
+- [x] small은 정책 검수 사례를 넉넉히 확인할 수 있도록 고객 300·주문 900·이벤트 6,000건, demo는 고객 1만·주문 3만·이벤트 20만 건을 생성한다. 이벤트 수는 주문 연결 PURCHASE를 포함한다.
 - [x] VIP 휴면·장바구니 이탈·미동의·탈퇴·hard bounce·연락처 없음·미구매 등 고정 그룹을 생성한다.
 - [ ] 노출 초과 그룹의 실제 발송 원천 이력은 campaign_deliveries가 추가되는 단계 9에서 생성한다.
 - [x] `device_type`, `LANDING_VIEW`, 주문 연결 PURCHASE를 생성한다. 모바일 이탈 그룹에는 구매를 만들지 않는다. 분석·화면 표시는 후속 단계다.
@@ -431,6 +431,8 @@ AI 테이블은 기존 008 일괄 추가안 대신 AI-A에서 004 세그먼트 �
 
 ## 12. 단계 8 — 정책 검수와 승인
 
+구현 안내: [단계 8 정책 검수와 승인](phase_8_policy_approval.md). `006` 마이그레이션, 정책 설정, 대상자 스냅샷 검수, 버전 기반 승인·반려·편집 재개와 Campaigns/Settings 화면을 구현했다. `campaign_deliveries`의 정책 조회용 원장은 단계 9보다 먼저 추가했으며 모의 발송 결과·run 연결은 단계 9에서 확장한다.
+
 ### 8-1. 규칙 엔진
 
 각 규칙은 `rule_code`, `severity`, `passed`, `affected_count`, `message`를 반환한다. 고객별 제외와 캠페인 전체 차단을 구분한다.
@@ -446,20 +448,20 @@ AI 테이블은 기존 008 일괄 추가안 대신 AI-A에서 004 세그먼트 �
 
 MVP 노출 한도 기본안은 채널별 1일 1회·최근 7일 3회다. 1일은 업무 시간대의 당일 구간, 7일은 실행 시각 기준 이동 구간으로 명시한다. 정책값은 누구나 Settings에서 변경할 수 있고 변경 시 version을 증가시킨다.
 
-- [ ] `domain/policies/`의 순수 규칙과 대상 조회를 분리한다.
-- [ ] 고객이 여러 규칙에 걸리면 모든 사유를 보관하되 집계표의 primary_reason은 최초 사유 하나만 사용한다.
-- [ ] `최초 인원 = primary_reason별 제외 합계 + 최종 인원`을 보장한다.
-- [ ] 쿠폰 만료, 필수 문구 누락, 금지 표현, 잘못된 실험 비율, 최종 0명은 캠페인 전체 차단으로 처리한다.
-- [ ] `POST /campaigns/{id}/validate`에서 검수 기록과 후보 고객 스냅샷을 저장한다. 이 엔드포인트는 검수 기록을 쓰지만 캠페인 내용을 변경하지 않는다.
+- [x] `domain/policies/`의 순수 규칙과 대상 조회를 분리한다.
+- [x] 고객이 여러 규칙에 걸리면 모든 사유를 보관하되 집계표의 primary_reason은 최초 사유 하나만 사용한다.
+- [x] `최초 인원 = primary_reason별 제외 합계 + 최종 인원`을 보장한다.
+- [x] 쿠폰 만료, 필수 문구 누락, 금지 표현, 잘못된 실험 비율, 최종 0명은 캠페인 전체 차단으로 처리한다.
+- [x] `POST /campaigns/{id}/validate`에서 검수 기록과 후보 고객 스냅샷을 저장한다. 이 엔드포인트는 검수 기록을 쓰지만 캠페인 내용을 변경하지 않는다.
 
 ### 8-2. 승인 대상 고정
 
-- [ ] `validation_runs`에 campaign/segment/policy/data version, reference_at, content_hash, count, 만료 시각을 둔다.
-- [ ] MVP 검수 유효시간은 30분으로 한다. 정책 변경·캠페인 변경 시 즉시 무효다.
-- [ ] `POST /request-approval`은 현재 version의 유효한 검수가 있을 때만 REVIEW로 전환한다.
-- [ ] `POST /approve`, `POST /reject`는 승인 요청 ID와 version을 확인하고 decision_source=VISITOR와 결정 시각을 기록한다. 작성한 방문자가 그대로 승인·반려할 수 있다.
-- [ ] 승인 후 카피·혜택·타깃을 변경하려면 먼저 DRAFT로 되돌리고 기존 승인을 무효화한다.
-- [ ] 세그먼트 원본이 수정되어도 캠페인은 저장된 revision을 유지한다. 새 revision 적용은 명시적 편집이다.
+- [x] `validation_runs`에 campaign/segment/policy/data version, reference_at, content_hash, count, 만료 시각을 둔다.
+- [x] MVP 검수 유효시간은 30분으로 한다. 정책 변경·캠페인 변경 시 즉시 무효다.
+- [x] `POST /request-approval`은 현재 version의 유효한 검수가 있을 때만 REVIEW로 전환한다.
+- [x] `POST /approve`, `POST /reject`는 승인 요청 ID와 version을 확인하고 decision_source=VISITOR와 결정 시각을 기록한다. 작성한 방문자가 그대로 승인·반려할 수 있다.
+- [x] 승인 후 카피·혜택·타깃을 변경하려면 먼저 DRAFT로 되돌리고 기존 승인을 무효화한다.
+- [x] 세그먼트 원본이 수정되어도 캠페인은 저장된 revision을 유지한다. 새 revision 적용은 명시적 편집이다.
 
 ### 8-3. 상태 전환표
 
@@ -733,4 +735,4 @@ SQLite로 통과한 테스트를 PostgreSQL 잠금·JSONB 검증의 대체로 �
 | 실제 발송 | 모의 전체 흐름 검증 및 채널 요구사항 확정 | provider adapter·webhook·수신 거부·실제 정책 검토 |
 | 다단계 여정·알림 | 단일 캠페인 운영이 안정적 | 트리거·대기·분기·중단·중복 처리 |
 
-다음 업무 구현은 **단계 8 정책 검수·승인 → AI-C 검수 도구 연결**이다. AI-B 초안·카피 생성과 확인 적용은 구현했으며 Settings 브랜드 가이드 편집과 실제 브라우저 전체 시연은 남아 있다.
+다음 업무 구현은 **AI-C 검수 도구 연결 → 단계 9 모의 발송**이다. 단계 8의 정책 설정·대상 검수·방문자 승인 흐름은 구현했으며, 발송 이력 원장에 실제 모의 발송 결과를 쓰는 작업은 단계 9에서 진행한다.

@@ -5,6 +5,7 @@ from app.services.datasets import require_dataset
 from app.services.audit import record_change
 from app.domain.campaigns.copy_policy import CURRENT_VERSION
 from contextlib import nullcontext
+from datetime import datetime, timezone
 
 FIELDS = ('name','objective','channel','benefit','brand_tone','primary_kpi','target_value','planned_at','coupon_expires_at','segment_revision_id')
 
@@ -60,3 +61,15 @@ def save(session, request, request_id, campaign_id=None, *, managed_transaction=
         record_change(session,dataset_id=row.dataset_id,resource_id=row.id,actor_type='VISITOR',
             action='CAMPAIGN_CREATED' if previous is None else 'CAMPAIGN_UPDATED',request_id=request_id,previous_version=previous,new_version=row.version)
         return representation(session,row)
+
+
+def archive(session, request, campaign_id, request_id):
+    with session.begin():
+        require_dataset(session,request.dataset_id,lock=True)
+        row=repository.get(session,request.dataset_id,campaign_id,lock=True)
+        if row is None: raise AppError('NOT_FOUND','캠페인을 찾을 수 없습니다.',404)
+        if row.status!='DRAFT' or row.version!=request.version:
+            raise AppError('VERSION_CONFLICT','작성 중인 최신 캠페인만 삭제할 수 있습니다.')
+        previous=row.version; row.version+=1; row.archived_at=datetime.now(timezone.utc)
+        record_change(session,dataset_id=row.dataset_id,resource_id=row.id,actor_type='VISITOR',action='CAMPAIGN_ARCHIVED',request_id=request_id,previous_version=previous,new_version=row.version)
+        return {'id':row.id,'archived':True,'version':row.version}
