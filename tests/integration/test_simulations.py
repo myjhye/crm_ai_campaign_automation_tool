@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from uuid import uuid4, UUID
 import pytest
 from fastapi.testclient import TestClient
@@ -94,3 +95,30 @@ def test_approved_campaign_can_be_archived_without_deleting_history(approved_cam
     assert response.json()['archived'] is True
     rows=client.get('/api/v1/campaigns',params={'dataset_id':str(dataset_id)}).json()['items']
     assert all(row['id']!=campaign['id'] for row in rows)
+
+def test_performance_counts_distinct_customers_and_reports_simulation(approved_campaign,database):
+    client,dataset_id,campaign,_=approved_campaign
+    sent=client.post(f"/api/v1/campaigns/{campaign['id']}/simulate-send",json={'dataset_id':str(dataset_id),'campaign_version':campaign['version']},headers={'Idempotency-Key':'performance-run'})
+    assert sent.status_code==202,sent.text
+    assert run_once(database,Settings(_env_file=None),None) is True
+    now=datetime.now(timezone.utc);params={'dataset_id':str(dataset_id),'from':(now-timedelta(days=1)).isoformat(),'to':(now+timedelta(days=1)).isoformat()}
+    first=client.get(f"/api/v1/campaigns/{campaign['id']}/performance",params=params)
+    assert first.status_code==200,first.text
+    result=first.json();totals=result['totals']
+    assert totals['delivered_customers']==totals['sent_customers']>0
+    assert totals['conversion_customers']>0 and Decimal(totals['revenue'])>0
+    assert len(result['variants'])==2 and result['experiment']['status']=='HOLD'
+    assert result['observation']['complete'] is True and result['observation']['window_days']==0
+    assert 'OBSERVATION_OPEN' not in result['experiment']['reasons']
+    assert result['incremental_revenue']['status']=='not_available' and result['contains_simulated_data'] is True
+    with database.sessions.begin() as session:
+        original=session.scalar(select(CampaignEvent).where(CampaignEvent.run_id==UUID(sent.json()['id']),CampaignEvent.event_type=='OPEN').limit(1))
+        if original:
+            session.add(CampaignEvent(dataset_id=original.dataset_id,campaign_id=original.campaign_id,run_id=original.run_id,delivery_id=original.delivery_id,
+                customer_id=original.customer_id,variant_id=original.variant_id,order_id=None,external_id=f'duplicate-open-{uuid4()}',event_type='OPEN',event_at=original.event_at+timedelta(seconds=1),source='SIMULATED'))
+    repeated=client.get(f"/api/v1/campaigns/{campaign['id']}/performance",params=params).json()
+    assert repeated['totals']['open_customers']==totals['open_customers']
+    summary=client.get('/api/v1/reports/summary',params=params).json()
+    assert summary['campaign_count']==1 and summary['contains_simulated_data'] is True
+    export=client.get('/api/v1/reports/export',params=params)
+    assert export.status_code==200 and export.content.startswith(b'\xef\xbb\xbf') and b'campaign_name' in export.content

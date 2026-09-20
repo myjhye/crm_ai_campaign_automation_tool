@@ -31,7 +31,8 @@ test('campaign copy editor saves A/B, switches SMS and recovers conflict',async 
   await expect(page.getByText('1개 선택됨 · 체크를 해제하면 제외 조건에서 빠집니다.')).toBeVisible();
   await exclusion.click();
   await expect(exclusion).not.toBeChecked();
-  for(const [label,value] of [['캠페인 이름','재구매 캠페인'],['캠페인 목표','재구매 증가'],['KPI 목표값','5'],['혜택','10% 쿠폰'],['A안 제목','다시 만나요'],['B안 제목','쿠폰을 확인하세요'],['A안 본문','새로운 상품을 만나보세요'],['B안 본문','쿠폰으로 쇼핑하세요'],['A안 가설','신상품 강조'],['B안 가설','혜택 강조']]) await page.getByLabel(label,{exact:true}).fill(value);
+  for(const [label,value] of [['캠페인 이름','재구매 캠페인'],['캠페인 목표','재구매 증가'],['KPI 목표값','5'],['혜택','10% 쿠폰'],['A안 제목','다시 만나요'],['B안 제목','쿠폰을 확인하세요'],['A안 본문','새로운 상품을 만나보세요'],['B안 본문','쿠폰으로 쇼핑하세요'],['A안 가설','혜택을 첫 문장에 배치하면 구매 동기를 명확히 하여 첫 구매 전환율을 높일 것이다.'],['B안 가설','친근한 인사로 관계를 형성하고 혜택을 자연스럽게 안내하면 재방문율을 높일 것이다.']]) await page.getByLabel(label,{exact:true}).fill(value);
+  for(const label of ['A안 가설','B안 가설']) expect(await page.getByLabel(label,{exact:true}).evaluate(node=>node.scrollHeight<=node.clientHeight+1)).toBeTruthy();
   const target = page.getByRole('group',{name:'대상 세그먼트',exact:true}).getByRole('checkbox',{name:'휴면 VIP',exact:true});
   await target.click();
   await expect(target).toBeChecked();
@@ -98,6 +99,7 @@ test('approved campaign starts one simulated run and shows completion',async ({p
     if(path.endsWith(`/runs/${runId}`)){status='COMPLETED';version=5;run={...run,status:'COMPLETED',sent_count:29,failed_count:1,
       failure_summary:{SYSTEM_ERROR:1},variant_summary:[{variant_name:'A',sent:14,failed:1,total:15},{variant_name:'B',sent:15,failed:0,total:15}],
       event_summary:{DELIVERED:29,OPEN:17,CLICK:8,CONVERSION:3,UNSUBSCRIBE:1}};return route.fulfill({json:run});}
+    if(path.endsWith('/performance'))return route.fulfill({json:{totals:{click_rate:{value:27.59},conversion_rate:{value:10.34},revenue:'45000.00'},experiment:{winner:null,absolute_difference_pp:2.1},observation:{complete:false}}});
     if(path.endsWith('/runs'))return route.fulfill({json:{run}});
     if(path.endsWith(campaign))return route.fulfill({json:detail()});
     if(path.endsWith('/campaigns'))return route.fulfill({json:{items:[detail()],total:1,page:1,page_size:20}});

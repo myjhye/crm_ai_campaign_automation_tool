@@ -107,11 +107,13 @@ Invoke-RestMethod "$base/data/import/$($preview.import_batch_id)"
   --reference-at "2026-09-19T00:00:00Z" --size small
 .\.venv\Scripts\python.exe -m scripts.seed_demo --seed 42 `
   --reference-at "2026-09-19T00:00:00Z" --size demo
+.\.venv\Scripts\python.exe -m scripts.seed_demo --seed 42 --size medium
 ```
 
 | 크기 | 고객 | 상품 | 주문 | 주문 항목 | 이벤트 |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | small | 300 | 10 | 900 | 900 | 6,000 |
+| medium | 5,000 | 300 | 15,000 | 15,000 | 100,000 |
 | demo | 10,000 | 300 | 30,000 | 30,000 | 200,000 |
 
 휴면 VIP, 장바구니 이탈, 미동의, 탈퇴, hard bounce, 연락처 없음, 모바일 landing 이탈, 최근 구매, 미구매, 반복 구매 그룹을 이름으로 구분한다. 이메일은 합성 `example.invalid` 주소다. 이벤트에는 주문에 연결된 PURCHASE가 포함된다. 모바일 이탈 그룹에는 구매를 만들지 않는다. 이 데이터는 시연을 위한 합성 패턴이며 실제 원인 분석 결과가 아니다.

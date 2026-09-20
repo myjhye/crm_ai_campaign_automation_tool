@@ -14,6 +14,10 @@ test('campaign sidebar only offers full draft and fills without saving',async({p
     return route.fulfill({json:path.endsWith('/'+id)?saved:{items:[],total:0,page:1,page_size:20}});
   });
   await page.goto('/#/campaigns');
+  const setupPanel=page.locator('.campaign-setup');
+  await expect(setupPanel).toHaveCSS('overflow-y','visible');
+  await page.getByRole('button',{name:'전체 초안 만들기',exact:true}).scrollIntoViewIfNeeded();
+  await expect(page.getByRole('button',{name:'전체 초안 만들기',exact:true})).toBeVisible();
   await expect(page.getByRole('checkbox',{name:'카피만 수정',exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'AI로 A/B 카피 채우기'})).toHaveCount(0);
   let generations=0;

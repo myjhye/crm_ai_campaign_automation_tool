@@ -21,11 +21,17 @@ from app.services.imports import plan_merge, apply_merge
 GENERATOR_VERSION = "v2"
 GROUPS = ["dormant_vip", "cart_abandon", "no_consent", "withdrawn", "hard_bounce",
           "missing_contact", "mobile_drop", "recent", "no_purchase", "repeat"]
+SIZE_CONFIG = {
+    "small": {"customers": 300, "products": 10, "name": "체험용 확장 샘플 (고객 300명)"},
+    "medium": {"customers": 5_000, "products": 300, "name": "체험용 중형 샘플 (고객 5,000명)"},
+    "demo": {"customers": 10_000, "products": 300, "name": "체험용 전체 샘플"},
+}
 
 
 def source_rows(seed, reference_at, size):
-    count = 300 if size == "small" else 10000
-    product_count = 10 if size == "small" else 300
+    config = SIZE_CONFIG[size]
+    count = config["customers"]
+    product_count = config["products"]
     offset = int(hashlib.sha256(str(seed).encode()).hexdigest()[:8], 16)
     customers = []
     for i in range(count):
@@ -68,7 +74,7 @@ def source_rows(seed, reference_at, size):
 
 def seed_demo(session, *, seed, reference_at, size="small", dataset_key="default"):
     reference_at = as_utc(reference_at)
-    if size not in ("small", "demo"):
+    if size not in SIZE_CONFIG:
         raise ValueError("Unsupported size")
     identity = f"growthpilot:{GENERATOR_VERSION}:{seed}:{reference_at.isoformat()}:{size}:{dataset_key}"
     dataset_id = uuid5(NAMESPACE_URL, identity)
@@ -78,7 +84,7 @@ def seed_demo(session, *, seed, reference_at, size="small", dataset_key="default
     existing = session.get(Dataset, dataset_id)
     if existing:
         return existing, False
-    name = "체험용 확장 샘플 (고객 300명)" if size == "small" else "체험용 전체 샘플"
+    name = SIZE_CONFIG[size]["name"]
     dataset = Dataset(id=dataset_id, name=name, source="DEMO", reference_at=reference_at)
     session.add(dataset)
     session.flush()
@@ -121,8 +127,8 @@ def seed_demo(session, *, seed, reference_at, size="small", dataset_key="default
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--reference-at", required=True, help="ISO 8601 timestamp with timezone")
-    parser.add_argument("--size", choices=["small", "demo"], default="small")
+    parser.add_argument("--reference-at", default="2026-09-20T00:00:00Z", help="ISO 8601 timestamp with timezone")
+    parser.add_argument("--size", choices=list(SIZE_CONFIG), default="small")
     parser.add_argument("--dataset-key", default="default", help="Change this to create a fresh demo copy")
     args = parser.parse_args()
     try:

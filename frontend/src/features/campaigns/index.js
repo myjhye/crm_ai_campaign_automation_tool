@@ -96,9 +96,13 @@ export async function renderCampaigns(root, route, signal) {
     el('p',{className:'small muted',text:'예정 시각은 참고 정보입니다. 자동 예약 발송은 실행되지 않습니다.'})));
   const copy = section('4. A/B 카피');
   const cards = el('div',{className:'campaign-variants'});
-  for (const name of ['A','B']) cards.append(el('div',{className:'campaign-variant'},el('h3',{text:`${name}안`}),
-    field(`${name}_subject`,`${name}안 제목`),field(`${name}_body`,`${name}안 본문`,{tag:'textarea',max:5000,attrs:{rows:5}}),
-    field(`${name}_hypothesis`,`${name}안 가설`,{max:1000})));
+  const resizeHypothesis=input=>{input.style.height='auto';input.style.height=`${input.scrollHeight+input.offsetHeight-input.clientHeight}px`;};
+  for (const name of ['A','B']) {
+    const hypothesis=field(`${name}_hypothesis`,`${name}안 가설`,{tag:'textarea',max:1000,attrs:{rows:2,className:'campaign-hypothesis'}});
+    fields[`${name}_hypothesis`].addEventListener('input',event=>resizeHypothesis(event.currentTarget),{signal});
+    cards.append(el('div',{className:'campaign-variant'},el('h3',{text:`${name}안`}),
+      field(`${name}_subject`,`${name}안 제목`),field(`${name}_body`,`${name}안 본문`,{tag:'textarea',max:5000,attrs:{rows:5}}),hypothesis));
+  }
   const limits = el('p',{className:'small muted'}); copy.append(limits,cards); form.append(copy);
   form.append(section('5. 실험 배분',field('A_ratio','A안 비율 (%)',{type:'number',attrs:{min:0.01,max:99.99,step:0.01}}),
     field('B_ratio','B안 비율 (%)',{type:'number',attrs:{min:0.01,max:99.99,step:0.01}})));
@@ -124,6 +128,7 @@ export async function renderCampaigns(root, route, signal) {
     for (const name of ['A','B']) {
       const variant = row?.variants.find(v => v.variant_name === name);
       for (const key of ['subject','body','hypothesis']) fields[`${name}_${key}`].value = variant?.[key] || '';
+      requestAnimationFrame(()=>resizeHypothesis(fields[`${name}_hypothesis`]));
       fields[`${name}_ratio`].value = (variant?.allocation_bp ?? 5000)/100;
     }
     channelChanged();

@@ -42,7 +42,9 @@ def plan(database,settings,query,request_id,provider=None):
     if len(rows)>100:
         return {'result_type':'clarification','message':'세그먼트가 많습니다. 메인 폼에서 대상을 선택하고 카피만 수정을 이용해주세요.'}
     options=[{'id':str(r.id),'name':r.name} for r in rows]
-    safe_prompt(json.dumps(options,ensure_ascii=False))
+    # UUIDs are server-issued identifiers, not user text. Scanning their random
+    # digit runs can produce false positives for the resident-number pattern.
+    safe_prompt(json.dumps([option['name'] for option in options],ensure_ascii=False))
     provider=provider or (MockProvider() if settings.ai_mode=='mock' else OpenAIProvider(settings))
     started=time.monotonic();status='FAILED';tokens=0
     try:

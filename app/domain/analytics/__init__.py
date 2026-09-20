@@ -1,1 +1,1 @@
-"""CRM 지표 계산 규칙을 배치한다."""
+"""Campaign performance calculations."""

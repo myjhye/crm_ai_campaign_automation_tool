@@ -1,6 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, Header
+from datetime import datetime
 from sqlalchemy.orm import Session
 from app.api.deps import get_session
 from app.schemas.campaign import CampaignWrite, CampaignUpdate, CampaignList, CampaignArchive
@@ -8,6 +9,7 @@ from app.services import campaigns as service
 from app.domain.campaigns.copy_policy import POLICIES, CURRENT_VERSION
 from app.schemas.simulations import SimulateSendRequest
 from app.services import simulations
+from app.services import performance
 
 router = APIRouter(prefix='/campaigns', tags=['campaigns'])
 DB = Annotated[Session,Depends(get_session)]
@@ -51,3 +53,14 @@ def run_detail(campaign_id:UUID,run_id:UUID,dataset_id:UUID,session:DB):
 @router.get('/{campaign_id}/runs')
 def latest_run(campaign_id:UUID,dataset_id:UUID,session:DB):
     return {'run':simulations.latest_run(session,dataset_id,campaign_id)}
+
+
+@router.get('/{campaign_id}/performance')
+def campaign_performance(campaign_id:UUID,dataset_id:UUID,session:DB,
+                         start:Annotated[datetime,Query(alias='from')]=None,
+                         end:Annotated[datetime,Query(alias='to')]=None,
+                         observation_to:datetime|None=None):
+    if start is None or end is None or end<=start:
+        from app.core.errors import AppError
+        raise AppError('INVALID_PERIOD','성과 기간의 시작과 종료를 올바르게 입력해주세요.',422)
+    return performance.campaign_performance(session,dataset_id,campaign_id,start,end,observation_to)
