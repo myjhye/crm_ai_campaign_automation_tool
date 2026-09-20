@@ -1,5 +1,7 @@
 # AI-B — 캠페인 초안·A/B 카피 제안과 확인 적용
 
+현재 전체 초안 생성의 요청·캐시·LLM·검증·화면 반영 구현은 [캠페인 전체 초안 LLM 구현 Walkthrough](campaign_draft_llm_walkthrough.md)에 파일별로 정리했다.
+
 ## 사용 방법
 
 Campaigns 오른쪽 어시스턴트는 **전체 초안 생성만 제공**한다. 대상·목표·채널·공통 말투·KPI·A/B 강조점을 선택하고 혜택과 KPI 목표값을 입력한 뒤 **전체 초안 만들기**를 누른다. 메인 폼을 미리 작성하거나 추가 문장을 입력할 필요는 없다.
@@ -34,7 +36,7 @@ Campaigns 오른쪽 어시스턴트는 **전체 초안 생성만 제공**한다.
 | `frontend/src/features/campaigns/ai.js` | 오른쪽 AI 입력·생성·실패 처리 |
 | `frontend/src/features/campaigns/index.js` | 메인 폼 조건 전달·A/B 자동 채우기·일반 저장 |
 
-현재 UI는 `/ai/campaign-draft`로 생성한다. 이 API가 보관하는 제안 레코드는 유지하지만 화면에서 제안 confirm API를 호출하지 않는다. 자동 채우기는 브라우저 입력값만 변경하고, 최종 저장은 일반 캠페인 POST/PUT과 버전 검사를 사용한다. 아래 제안 수정·확인 보장은 유지된 백엔드 API의 계약이다.
+현재 UI는 `/ai/campaign-plan`에 확정된 `campaign_setup`을 보내 전체 초안을 생성한다. 이 API가 보관하는 제안 레코드는 유지하지만 화면에서 제안 confirm API를 호출하지 않는다. 자동 채우기는 브라우저 입력값만 변경하고, 최종 저장은 일반 캠페인 POST/PUT과 버전 검사를 사용한다. `/ai/campaign-draft`와 아래 제안 수정·확인 보장은 유지된 호환 백엔드 API의 계약이다.
 
 기존 `/api/v1/ai/chat`에 `campaign_brief` 또는 `campaign_id`·`campaign_version`을 추가한다. 별도 `/api/v1/ai/campaign-draft`, `/api/v1/ai/copy-variants`도 같은 서비스를 호출한다. `POST /ai/actions/{id}/revise`는 방문자가 편집한 문안으로 새로운 제안 ID와 hash를 만들며, 이전 카드는 만료한다. 확인 API는 수정 payload를 직접 받지 않는다.
 
