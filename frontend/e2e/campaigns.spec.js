@@ -16,6 +16,7 @@ test('campaign copy editor saves A/B, switches SMS and recovers conflict',async 
     return route.fulfill({json:path.endsWith(campaign)?saved:{items:saved?[saved]:[],total:saved?1:0,page:1,page_size:20}});
   });
   await page.goto('/#/campaigns');
+  await expect(page.getByLabel('브랜드 톤',{exact:true})).toHaveCount(0);
   await expect(page.getByText('제외 없음 · 필요한 세그먼트만 체크하세요.')).toBeVisible();
   const exclusion = page.getByRole('group',{name:'제외 세그먼트',exact:true}).getByRole('checkbox',{name:'휴면 VIP',exact:true});
   await exclusion.click();
@@ -23,7 +24,7 @@ test('campaign copy editor saves A/B, switches SMS and recovers conflict',async 
   await expect(page.getByText('1개 선택됨 · 체크를 해제하면 제외 조건에서 빠집니다.')).toBeVisible();
   await exclusion.click();
   await expect(exclusion).not.toBeChecked();
-  for(const [label,value] of [['캠페인 이름','재구매 캠페인'],['캠페인 목표','재구매 증가'],['KPI 목표값','5'],['혜택','10% 쿠폰'],['브랜드 톤','친근함'],['A안 제목','다시 만나요'],['B안 제목','쿠폰을 확인하세요'],['A안 본문','새로운 상품을 만나보세요'],['B안 본문','쿠폰으로 쇼핑하세요'],['A안 가설','신상품 강조'],['B안 가설','혜택 강조']]) await page.getByLabel(label,{exact:true}).fill(value);
+  for(const [label,value] of [['캠페인 이름','재구매 캠페인'],['캠페인 목표','재구매 증가'],['KPI 목표값','5'],['혜택','10% 쿠폰'],['A안 제목','다시 만나요'],['B안 제목','쿠폰을 확인하세요'],['A안 본문','새로운 상품을 만나보세요'],['B안 본문','쿠폰으로 쇼핑하세요'],['A안 가설','신상품 강조'],['B안 가설','혜택 강조']]) await page.getByLabel(label,{exact:true}).fill(value);
   const target = page.getByRole('group',{name:'대상 세그먼트',exact:true}).getByRole('checkbox',{name:'휴면 VIP',exact:true});
   await target.click();
   await expect(target).toBeChecked();
@@ -37,6 +38,7 @@ test('campaign copy editor saves A/B, switches SMS and recovers conflict',async 
   await page.getByRole('button',{name:'초안 저장 후 확인'}).click();
   await expect(page.getByText('캠페인 초안이 저장되었습니다.',{exact:true})).toBeVisible();
   expect(saved.variants[0].allocation_bp).toBe(5000);
+  expect(saved.brand_tone).toBe('다정하고 편안하게');
   expect(saved.exclusion_revision_ids).toEqual([]);
   await page.getByLabel('채널',{exact:true}).selectOption('SMS');
   await expect(page.getByLabel('A안 제목',{exact:true})).toBeDisabled();

@@ -1,6 +1,7 @@
 import {el, button, heading, errorMessage, stateCard} from '../../components/dom.js';
 import {request, isUUID, isPage} from '../../api/client.js';
 import {navigate} from '../../app/router.js';
+import {campaignAssistant} from './ai.js';
 
 const validRow = r => isUUID(r?.id) && typeof r.name === 'string' && Number.isInteger(r.version);
 const validDetail = r => validRow(r) && Array.isArray(r.variants) && r.variants.length === 2 && Array.isArray(r.exclusion_revision_ids);
@@ -17,9 +18,10 @@ export async function renderCampaigns(root, route, signal) {
   if (signal.aborted) return;
   let current = existing, busy = false;
   const fields = {};
+  fields.brand_tone = {value:'다정하고 편안하게'};
   const form = el('form', {className:'card campaign-form'});
   const notice = el('div', {role:'status', className:'campaign-notice'});
-  const review = el('section', {className:'card', hidden:''});
+  const review = el('section', {className:'card campaign-save-review', hidden:'','aria-label':'저장 내용 확인'});
   function field(key, label, options = {}) {
     const input = el(options.tag || 'input', {name:key, 'aria-label':label, type:options.type || (options.tag ? null : 'text'),
       required:options.optional ? null : '', maxlength:options.max || 200, ...options.attrs});
@@ -87,7 +89,7 @@ export async function renderCampaigns(root, route, signal) {
     form.append(more);
   }
   form.append(section('3. 채널과 혜택', field('channel','채널',{tag:'select',values:[['EMAIL','이메일'],['PUSH','앱 푸시'],['SMS','SMS']]}),
-    field('benefit','혜택',{max:1000}),field('brand_tone','브랜드 톤'),
+    field('benefit','혜택',{max:1000}),
     field('planned_at','발송 예정 정보 (한국 시간)',{type:'datetime-local',optional:true}),
     field('coupon_expires_at','쿠폰 만료 (한국 시간)',{type:'datetime-local',optional:true}),
     el('p',{className:'small muted',text:'예정 시각은 참고 정보입니다. 자동 예약 발송은 실행되지 않습니다.'})));
@@ -112,7 +114,7 @@ export async function renderCampaigns(root, route, signal) {
   }
   function populate(row) {
     if (row) addTarget(row.segment_revision_id,'저장된 대상 버전 (유지)');
-    for (const key of ['name','objective','channel','benefit','brand_tone','primary_kpi','target_value','segment_revision_id']) fields[key].value = row?.[key] ?? ({channel:'EMAIL',primary_kpi:'conversion_rate'}[key] || '');
+    for (const key of ['name','objective','channel','benefit','brand_tone','primary_kpi','target_value','segment_revision_id']) fields[key].value = row?.[key] ?? ({channel:'EMAIL',primary_kpi:'conversion_rate',brand_tone:'다정하고 편안하게'}[key] || '');
     updateTarget();
     for (const key of ['planned_at','coupon_expires_at']) fields[key].value = localTime(row?.[key]);
     for (const id of row?.exclusion_revision_ids || []) if (!exclusionChecks.has(id)) addExclusion(id,'저장된 제외 버전');
@@ -155,13 +157,20 @@ export async function renderCampaigns(root, route, signal) {
       current = await request(`/campaigns/${saved.id}?dataset_id=${route.dataset}`,{signal,validate:validDetail});
       notice.textContent = '캠페인 초안이 저장되었습니다.';
       review.hidden = false;
-      review.replaceChildren(el('h2',{text:'6. 저장 내용 확인'}),el('p',{text:`${current.name} · ${current.channel} · A ${variants[0].allocation_bp/100}% / B ${variants[1].allocation_bp/100}%`}),
-        el('p',{text:'초안 저장 완료 · 대상자 정책 검수와 승인은 아직 진행하지 않았습니다.'}),
-        button('저장된 캠페인 열기',() => navigate({view:'campaigns',resource:current.id}),signal));
-      review.append(button('이 내용으로 새 캠페인 작성',() => {
+      const actions=el('div',{className:'campaign-save-actions'},
+        button('저장된 캠페인 열기',() => navigate({view:'campaigns',resource:current.id}),signal,'button'),
+        button('이 내용으로 새 캠페인 작성',() => {
         const copy = {...current,name:`${current.name} 복사본`};
         current = null; populate(copy); review.hidden = true; notice.textContent = '복사한 내용을 편집한 뒤 저장해주세요.';
       },signal));
+      review.replaceChildren(
+        el('div',{className:'campaign-save-heading'},el('span',{className:'campaign-save-check','aria-hidden':'true',text:'✓'}),
+          el('div',{},el('p',{className:'small muted',text:'6. 저장 내용 확인'}),el('h2',{text:'초안 저장 완료'}))),
+        el('h3',{className:'campaign-save-name',text:current.name}),
+        el('div',{className:'campaign-save-meta'},
+          el('span',{className:'badge',text:{EMAIL:'이메일',PUSH:'앱 푸시',SMS:'SMS'}[current.channel]||current.channel}),
+          el('span',{className:'small',text:`A ${variants[0].allocation_bp/100}% · B ${variants[1].allocation_bp/100}%`})),
+        el('p',{className:'campaign-save-note small muted',text:'대상자 정책 검수와 승인은 아직 진행하지 않았습니다.'}),actions);
       await refreshList();
     } catch(error) {
       if (signal.aborted) return;
@@ -182,8 +191,30 @@ export async function renderCampaigns(root, route, signal) {
   }
   async function refreshList() {drawList(await request(`/campaigns?dataset_id=${route.dataset}&page=${route.page||1}`,{signal,validate:isPage(validRow)}));}
   drawList(page);
-  root.replaceChildren(heading('Campaigns','세그먼트를 선택하고 채널별 A/B 캠페인을 준비하세요.',button('새 캠페인',() => {
+  const fingerprint=()=>JSON.stringify([current?.id,...Object.values(fields).map(input=>input.value),...[...exclusionChecks].filter(([,input])=>input.checked).map(([id])=>id)]);
+  const assistant = campaignAssistant({route,signal,isBusy:()=>busy,fingerprint,
+    applyFull:(data,name)=>{
+      addTarget(data.segment_revision_id,name);
+      populate({...data,planned_at:utcTime(fields.planned_at.value),coupon_expires_at:utcTime(fields.coupon_expires_at.value),exclusion_revision_ids:[...exclusionChecks].filter(([,input])=>input.checked).map(([id])=>id)});
+      review.hidden=true;
+      notice.textContent='전체 초안이 입력되었습니다. 추천값을 검토한 뒤 저장해주세요.';
+    },
+    setBusy:value=>{busy=value;form.inert=value;submit.disabled=value;},
+    read:()=>{
+      const brief={};
+      for(const key of ['segment_revision_id','name','objective','channel','benefit','brand_tone','primary_kpi','target_value']) {
+        brief[key]=fields[key].value.trim();
+        if(!brief[key])throw new Error('메인 폼의 이름·목표·대상·채널·혜택·KPI를 먼저 입력해주세요.');
+      }
+      brief.coupon_expires_at=utcTime(fields.coupon_expires_at.value);
+      return {brief,fingerprint:fingerprint()};
+    },
+    apply:variants=>{
+      for(const variant of variants)for(const key of ['subject','body','hypothesis'])fields[`${variant.variant_name}_${key}`].value=variant[key];
+      review.hidden=true;notice.textContent='AI 카피가 입력되었습니다. 아직 저장되지 않았습니다.';
+    }});
+  root.replaceChildren(heading('Campaigns','세그먼트를 선택하고 채널별 A/B 캠페인을 준비하세요.',button('초기화',() => {
     if (route.resource) navigate({resource:''}); else {current = null; populate(null); notice.textContent = ''; review.hidden = true;}
-  },signal)), el('div',{className:'campaign-workspace'},el('div',{className:'stack'},form,review),list));
+  },signal)), el('div',{className:'campaign-workspace'},el('div',{className:'stack'},form,review),el('div',{className:'stack campaign-sidebar'},assistant,list)));
   if (!segments.total && !current) {submit.disabled = true; notice.append(stateCard('세그먼트가 필요합니다','대상 조건을 먼저 저장해주세요.',button('세그먼트 만들기',() => navigate({view:'segments',resource:''}),signal)));}
 }

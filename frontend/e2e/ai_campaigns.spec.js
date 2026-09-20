@@ -1,0 +1,55 @@
+import {test,expect} from '@playwright/test';
+const id='11111111-1111-4111-8111-111111111111';
+test('campaign sidebar fills copy without saving and preserves input on failure',async({page})=>{
+  let writes=0,saved=null,fail=false;
+  const dataset={id,name:'샘플',source:'DEMO',purpose:'ANALYSIS',customer_count:100,order_count:300,event_count:2000,version:1,created_at:'2026-09-19T00:00:00Z',updated_at:'2026-09-19T00:00:00Z',reference_at:'2026-09-19T00:00:00Z'};
+  await page.route('**/api/v1/**',route=>{
+    const path=new URL(route.request().url()).pathname;
+    if(path.endsWith('/datasets'))return route.fulfill({json:{items:[dataset],total:1,page:1,page_size:100}});
+    if(path.endsWith('/segments'))return route.fulfill({json:{items:[{id,revision_id:id,name:'VIP'}],total:1,page:1,page_size:100}});
+    if(path.endsWith('/status'))return route.fulfill({json:{mode:'mock',available:true}});
+    if(path.endsWith('/copy-policy'))return route.fulfill({json:{version:1,channels:{EMAIL:{subject_max:120,body_max:5000},PUSH:{subject_max:60,body_max:300},SMS:{subject_max:0,body_max:500}}}});
+    if(path.endsWith('/campaign-draft'))return fail?route.fulfill({status:502,json:{error:{message:'생성 실패'}}}):route.fulfill({json:{mode:'mock',result_type:'campaign_draft',data:{variants:['A','B'].map(n=>({variant_name:n,subject:n+' 혜택 안내',body:'10% 할인',hypothesis:'반응 비교'}))}}});
+    if(route.request().method()==='POST'){writes++;saved={...route.request().postDataJSON(),id,version:1,status:'DRAFT'};return route.fulfill({json:saved});}
+    return route.fulfill({json:path.endsWith('/'+id)?saved:{items:[],total:0,page:1,page_size:20}});
+  });
+  await page.goto('/#/campaigns');
+  for(const [label,value] of [['캠페인 이름','재구매'],['캠페인 목표','재구매 증가'],['KPI 목표값','5'],['혜택','10% 할인']])await page.getByLabel(label,{exact:true}).fill(value);
+  await page.getByRole('group',{name:'대상 세그먼트',exact:true}).getByRole('checkbox',{name:'VIP',exact:true}).check();
+  await page.getByLabel('A안 비율 (%)',{exact:true}).fill('40');
+  await page.getByLabel('B안 비율 (%)',{exact:true}).fill('60');
+  await page.getByRole('button',{name:'AI로 A/B 카피 채우기'}).click();
+  await expect(page.getByLabel('A안 제목',{exact:true})).toHaveValue('A 혜택 안내');
+  await expect(page.getByLabel('A안 비율 (%)',{exact:true})).toHaveValue('40');
+  expect(writes).toBe(0);
+  fail=true;
+  await page.getByRole('button',{name:'AI로 A/B 카피 채우기'}).click();
+  await expect(page.getByText('생성 실패',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('A안 제목',{exact:true})).toHaveValue('A 혜택 안내');
+  await page.getByRole('button',{name:'초안 저장 후 확인'}).click();
+  await expect(page.getByText('캠페인 초안이 저장되었습니다.',{exact:true})).toBeVisible();
+  expect(writes).toBe(1);expect(saved.variants[0].allocation_bp).toBe(4000);
+  await page.route('**/ai/campaign-plan',route=>{
+    const setup=route.request().postDataJSON().campaign_setup;
+    expect(setup).toMatchObject({segment_revision_id:id,benefit:'15% 할인 쿠폰',brand_tone:'다정하고 편안하게',a_focus:'혜택 강조',b_focus:'관계 강조',target_value:'5'});
+    return route.fulfill({json:{result_type:'campaign_draft',segment_name:'VIP',notice:'추천값을 확인해주세요.',data:{...saved,name:'AI 전체 초안',variants:saved.variants}}});
+  });
+  await page.getByRole('checkbox',{name:'전체 초안 생성',exact:true}).check();
+  await expect(page.getByRole('checkbox',{name:'카피만 수정',exact:true})).not.toBeChecked();
+  await expect(page.getByRole('button',{name:'초기화',exact:true})).toBeVisible();
+  await page.getByLabel('AI 카피 요청').fill('');
+  await page.getByRole('button',{name:'전체 초안 만들기',exact:true}).click();
+  await expect(page.getByText('초안 대상을 선택해주세요.',{exact:true})).toBeVisible();
+  await page.getByRole('group',{name:'초안 대상',exact:true}).getByRole('checkbox',{name:'VIP',exact:true}).check();
+  await page.getByLabel('전체 초안 혜택',{exact:true}).fill('15% 할인 쿠폰');
+  await page.getByRole('button',{name:'전체 초안 만들기',exact:true}).click();
+  await expect(page.getByLabel('캠페인 이름',{exact:true})).toHaveValue('AI 전체 초안');
+  await expect(page.getByRole('button',{name:'확인 후 메인 폼에 적용'})).toHaveCount(0);
+  const toast=page.locator('.campaign-ai-success');
+  await expect(toast).toBeVisible();
+  await expect(toast).toHaveCount(0,{timeout:6000});
+  expect(writes).toBe(1);
+  await page.screenshot({path:'test-results/ai-campaigns.png',fullPage:true});
+  await page.goto('/#/ai');
+  await expect(page.getByText('캠페인 생성·카피 변경 설정',{exact:true})).toHaveCount(0);
+});
