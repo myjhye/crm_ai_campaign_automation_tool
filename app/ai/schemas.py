@@ -52,9 +52,12 @@ class ChatRequest(AnalyticsQuery):
     campaign_version: int | None = Field(default=None,ge=1,strict=True)
     validation_campaign_id: UUID | None = None
     validation_campaign_version: int | None = Field(default=None, ge=1, strict=True)
+    analysis_campaign_id: UUID | None = None
 
     @model_validator(mode='after')
     def validation_context(self):
+        if self.analysis_campaign_id and (self.validation_campaign_id or self.campaign_id or self.campaign_brief or self.campaign_setup):
+            raise ValueError('성과 분석은 다른 캠페인 작업과 함께 요청할 수 없습니다.')
         if (self.validation_campaign_id is None) != (self.validation_campaign_version is None):
             raise ValueError('검수 캠페인 ID와 버전을 함께 입력해주세요.')
         if self.validation_campaign_id and (self.campaign_id or self.campaign_brief or self.campaign_setup):

@@ -21,6 +21,10 @@ def payload_hash(payload):
 
 
 def chat(database, settings, query, request_id, provider=None):
+    if query.analysis_campaign_id:
+        from app.ai.performance import analyze, PerformanceRequest
+        return analyze(database,settings,PerformanceRequest(dataset_id=query.dataset_id,campaign_id=query.analysis_campaign_id,
+            start=query.start,end=query.end,prompt=query.prompt),request_id,provider)
     if query.campaign_brief or query.campaign_id:
         from app.ai.campaigns import propose
         return propose(database,settings,query,request_id,provider)
@@ -117,6 +121,9 @@ def confirm(session, proposal_id, dataset_id, request_id):
         if proposal.action_type in ('CAMPAIGN_CREATE','CAMPAIGN_COPY'):
             from app.ai.campaigns import apply
             return apply(session,proposal,request_id)
+        if proposal.action_type == 'CAMPAIGN_FOLLOWUP':
+            from app.ai.performance import apply_followup
+            return apply_followup(session,proposal,request_id)
         result = segments.save(session, SegmentWrite.model_validate(proposal.payload), request_id,
                                managed_transaction=True, created_source='AI')
         proposal.segment_id = result['id']

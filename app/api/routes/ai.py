@@ -5,8 +5,16 @@ from app.ai import orchestrator
 from app.core.errors import AppError
 from app.ai.campaigns import CopyRevision, revise
 from pydantic import ValidationError
+from app.ai.performance import PerformanceRequest, analyze
 
 router = APIRouter(prefix='/ai', tags=['ai'])
+
+
+@router.post('/performance-analysis')
+def performance_analysis(payload: PerformanceRequest, request: Request):
+    database=request.app.state.database
+    if database is None: raise AppError('DATABASE_UNAVAILABLE','DB 연결이 필요합니다.',503)
+    return analyze(database,request.app.state.settings,payload,UUID(request.state.request_id),getattr(request.app.state,'ai_provider',None))
 
 
 @router.post('/campaign-plan')

@@ -35,6 +35,31 @@ def test_privacy_and_ambiguous_mock():
         with pytest.raises(AppError): safe_prompt(prompt)
     assert MockProvider().plan('VIP 찾아줘', {})[0] == 'clarify'
 
+
+def test_performance_wire_contract_is_evidence_only(monkeypatch):
+    from app.ai.performance import analysis_tool
+    original=httpx.Client;captured=[]
+    def handler(request):
+        captured.append(json.loads(request.content))
+        return httpx.Response(200,json={'status':'completed','output':[{'type':'function_call','name':'analyze_campaign',
+            'arguments':json.dumps({'facts':[{'metric_id':'A.conversion_rate'}],'hypotheses':[],'recommended_actions':['RETEST']})}]})
+    monkeypatch.setattr(httpx,'Client',lambda **kw:original(transport=httpx.MockTransport(handler),**kw))
+    refs={'A.conversion_rate':{'value':'3.27','label':'A안 전환율','unit':'%'}}
+    context={'performance':{'metric_refs':refs},'analysis_tool':analysis_tool(refs)}
+    result=OpenAIProvider(Settings(_env_file=None,openai_api_key='test')).plan('성과 분석',context)
+    assert result[0]=='analyze_campaign'
+    body=captured[0];assert body['store'] is False
+    assert len(body['tools'])==1 and body['tools'][0]['strict'] is True
+    assert body['tools'][0]['parameters']['properties']['facts']['items']['properties']['metric_id']['enum']==['A.conversion_rate']
+    assert set(body['tools'][0]['parameters']['properties']['facts']['items']['properties'])=={'metric_id'}
+    # The strict wire contract must enforce the same list bounds as the server.
+    from app.ai.performance import AnalysisSelection
+    properties=body['tools'][0]['parameters']['properties']
+    validated=AnalysisSelection.model_json_schema()['properties']
+    for field in ('facts','hypotheses','recommended_actions'):
+        for bound in ('minItems','maxItems'):
+            assert properties[field].get(bound)==validated[field].get(bound)
+
 def test_campaign_validation_uses_the_only_bounded_tool(monkeypatch):
     original=httpx.Client; captured=[]
     def handler(request):
