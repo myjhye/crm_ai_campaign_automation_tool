@@ -4,7 +4,7 @@ import {renderAI} from '../features/ai/index.js';
 import {renderDashboard} from '../features/dashboard/index.js';
 import {renderCustomers} from '../features/customers/index.js';
 import {datasets} from '../api/client.js';
-import {pages, startRouter, navigate, routeHash, apiPeriod, defaultPeriod} from './router.js';
+import {pages, navigationPages, startRouter, navigate, routeHash, apiPeriod, defaultPeriod} from './router.js';
 import {store} from './store.js';
 import {el, button, heading, loading, stateCard, errorMessage, formatTime} from '../components/dom.js';
 import {renderData} from '../features/data/index.js';
@@ -47,8 +47,8 @@ async function render(route) {
   const title = pages.find(([id]) => id === route.view)?.[1] || '페이지 없음';
   document.title = `${title} · GrowthPilot`;
   document.getElementById('breadcrumb').textContent = title;
-  document.getElementById('navigation').replaceChildren(...pages.map(([id, label, icon]) =>
-    el('a', {id: id === 'ai' ? 'ai-page-link' : null, className: 'nav-link', href: routeHash({...route, view: id, resource: '', page: 1, q: ''}), 'aria-current': route.view === id ? 'page' : null},
+  document.getElementById('navigation').replaceChildren(...navigationPages.map(([id, label, icon]) =>
+    el('a', {id: id === 'ai' ? 'ai-page-link' : null, className: 'nav-link', href: routeHash({...route, view: id, resource: '', tab: '', page: 1, q: ''}), 'aria-current': route.view === id ? 'page' : null},
       el('span', {className: 'nav-icon', 'aria-hidden': 'true', text: icon}), el('span', {text: label}))));
   try {
     if (route.issues.length) {

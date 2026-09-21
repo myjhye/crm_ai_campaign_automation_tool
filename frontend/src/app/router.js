@@ -6,6 +6,8 @@ export const pages = [
   ['data', 'Data & Integrations', '▦'], ['settings', 'Settings', '⚙'],
   ['ai', 'AI 어시스턴트', '✦'],
 ];
+// Administration stays addressable without crowding the public demo navigation.
+export const navigationPages = pages.filter(([id]) => !['data', 'settings'].includes(id));
 export function validDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value < '1900-01-01' || value > '9998-12-31') return false;
   const date = new Date(`${value}T00:00:00Z`);
