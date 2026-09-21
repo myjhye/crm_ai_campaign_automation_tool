@@ -42,7 +42,7 @@ export function parseRoute(hash, now) {
   if ((route.dataset && !isUUID(route.dataset)) || (route.resource && !isUUID(route.resource))) route.issues.push('주소의 데이터 식별자가 올바르지 않습니다.');
   if (!Number.isSafeInteger(route.page) || route.page < 1 || route.page > 1000000) route.issues.push('페이지 번호가 올바르지 않습니다.');
   if (route.q.length > 200) route.issues.push('검색어는 200자 이하로 입력해주세요.');
-  if (route.tab && !['compose','review','results'].includes(route.tab)) route.issues.push('존재하지 않는 캠페인 탭입니다.');
+  if (route.tab && !['compose','review','results','ai-analysis'].includes(route.tab)) route.issues.push('존재하지 않는 캠페인 탭입니다.');
   try { apiPeriod(route.from, route.to); } catch { route.issues.push('조회 기간이 올바르지 않습니다.'); }
   return route;
 }

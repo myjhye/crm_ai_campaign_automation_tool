@@ -1,6 +1,7 @@
 import {request} from '../../api/client.js';
 import {apiPeriod,navigate} from '../../app/router.js';
 import {el,button,heading,stateCard} from '../../components/dom.js';
+import {campaignAnalysis} from '../campaigns/analysis.js';
 
 const holdLabels={OBSERVATION_OPEN:'관찰 기간 진행 중',INSUFFICIENT_SAMPLE:'표본 부족',GUARDRAIL_WORSE:'수신거부율 악화',REVENUE_SIGNIFICANCE_NOT_AVAILABLE:'매출 주지표 판정 미지원'};
 const kpiLabels={click_rate:'클릭률',conversion_rate:'전환율',revenue:'기여 매출'};
@@ -33,6 +34,9 @@ function verdict(test,a,b){
 export async function renderExperiments(root,route,signal){
   const period=apiPeriod(route.from,route.to);const query=new URLSearchParams({dataset_id:route.dataset,from:period.from,to:period.to,page_size:'100'});
   const rows=await request(`/reports/campaigns?${query}`,{signal});
+  const selected=route.resource?rows.items.find(row=>row.campaign.id===route.resource):rows.items[0];
+  const analysisTab=route.tab==='ai-analysis';
+  const analyses=new Map(rows.items.filter(row=>row.campaign.status==='COMPLETED').map(row=>[row.campaign.id,campaignAnalysis({route,signal,campaign:row.campaign,view:'experiments',experiment:row.experiment})]));
   const cards=rows.items.map(row=>{
     const variants=Object.fromEntries(row.variants.map(item=>[item.name,item]));const a=variants.A||{},b=variants.B||{},test=row.experiment;
     const result=verdict(test,a,b);
@@ -73,8 +77,25 @@ export async function renderExperiments(root,route,signal){
             ].map(([label,value])=>el('tr',{},el('th',{scope:'row',text:label}),el('td',{text:value}))))),
           el('p',{text:`필요 표본은 상대 MDE 50%·검정력 80% 가정의 추정치입니다. 시연 판정 하한은 안별 ${test.minimum_sample_per_variant}명입니다.`}),
           el('p',{text:'이 실험은 두 발송안의 비교입니다. 무발송 대비 효과는 포함되지 않습니다.'}))),
-      button('캠페인 결과 열기',()=>navigate({view:'campaigns',resource:row.campaign.id,tab:'results'}),signal,'button secondary'));
+      button('캠페인 결과 열기',()=>navigate({view:'campaigns',resource:row.campaign.id,tab:'results'}),signal,'button secondary'),
+      analyses.get(row.campaign.id)?.entry);
 
   });
-  root.replaceChildren(heading('Experiments','A/B 주요 지표 차이와 판단 가능한 범위를 확인합니다.'),cards.length?el('div',{className:'experiment-list'},...cards):stateCard('완료된 실험이 없습니다','캠페인 모의 발송을 완료하면 A/B 결과를 비교할 수 있습니다.'));
+  const tabs=el('nav',{className:'campaign-tabs','aria-label':'실험 화면'});
+  for(const [id,label] of [['results','실험 결과'],['ai-analysis','AI 분석']]){
+    const control=button(label,()=>navigate({view:'experiments',resource:selected?.campaign.id||'',tab:id}),signal,'button campaign-tab');
+    control.setAttribute('aria-current',(analysisTab?id==='ai-analysis':id==='results')?'page':'false');
+    if(id==='ai-analysis')control.disabled=!selected||!analyses.has(selected.campaign.id);
+    tabs.append(control);
+  }
+  const content=el('div');
+  if(analysisTab){
+    const selection=el('select',{'aria-label':'분석할 실험 캠페인'},el('option',{value:'',text:'캠페인을 선택해주세요'}),
+      ...rows.items.filter(row=>analyses.has(row.campaign.id)).map(row=>el('option',{value:row.campaign.id,text:campaignName(row.campaign.name)})));
+    selection.value=selected?.campaign.id||'';
+    selection.addEventListener('change',()=>{if(selection.value)navigate({resource:selection.value,tab:'ai-analysis'});},{signal});
+    content.append(el('label',{className:'experiment-analysis-select'},el('span',{text:'분석할 캠페인'}),selection),
+      selected&&analyses.has(selected.campaign.id)?analyses.get(selected.campaign.id).panel:stateCard('분석할 캠페인을 선택해주세요','선택 기간의 완료된 실험을 선택하면 성과를 분석할 수 있습니다.'));
+  }else content.append(cards.length?el('div',{className:'experiment-list'},...cards):stateCard('완료된 실험이 없습니다','캠페인 모의 발송을 완료하면 A/B 결과를 비교할 수 있습니다.'));
+  root.replaceChildren(heading('Experiments','A/B 주요 지표 차이와 판단 가능한 범위를 확인합니다.'),tabs,content);
 }

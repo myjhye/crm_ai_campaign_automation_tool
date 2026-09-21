@@ -83,10 +83,19 @@ test('approved campaign starts one simulated run and shows completion',async ({p
   const runId='44444444-4444-4444-8444-444444444444',jobId='55555555-5555-4555-8555-555555555555';
   const dataset={id,name:'체험용 샘플',purpose:'ANALYSIS',source:'DEMO',customer_count:300,order_count:900,event_count:6000,version:1,reference_at:'2026-09-19T00:00:00Z',created_at:'2026-09-19T00:00:00Z',updated_at:'2026-09-19T00:00:00Z'};
   const variants=['A','B'].map((variant_name,index)=>({id:index?runId:revision,variant_name,subject:variant_name,body:'15% 할인 쿠폰',hypothesis:variant_name,allocation_bp:5000}));
-  let status='APPROVED',version=3,run=null,key=null;
+  let status='APPROVED',version=3,run=null,key=null,analyses=0;
   const detail=()=>({id:campaign,dataset_id:id,name:'승인 캠페인',objective:'재구매',channel:'EMAIL',benefit:'15% 할인 쿠폰',brand_tone:'다정하게',primary_kpi:'conversion_rate',target_value:'5.00',segment_revision_id:revision,exclusion_revision_ids:[],planned_at:null,coupon_expires_at:null,status,version,variants});
   await page.route('**/api/v1/**',route=>{
     const url=new URL(route.request().url()),path=url.pathname,method=route.request().method();
+    if(path.endsWith('/ai/performance-analysis')){
+      analyses++;
+      return route.fulfill({json:{result_type:'performance_analysis',mode:'mock',data:{campaign_id:campaign,reference_at:'2026-09-20T00:00:00Z',experiment:{winner:null},
+        facts:[{metric_id:'A.delivered_customers',label:'A안 전달 고객',value:'14',unit:'명'}],
+        metric_refs:{'A.delivered_customers':{value:'14',unit:'명'},'B.delivered_customers':{value:'15',unit:'명'}},
+        hypotheses:['검증 전 가설입니다.'],limitations:['합성 성과입니다.'],recommended_actions:[{text:'표본을 늘려 재검증하세요.'}],
+        proposal:{proposal_id:jobId,expires_at:'2099-09-20T00:00:00Z',segment_name:'휴면 VIP',draft:{...detail(),name:'후속 실험'}}}}});
+    }
+    if(path.endsWith(`/ai/actions/${jobId}/confirm`))return route.fulfill({json:{id:jobId,status:'DRAFT'}});
     if(path.endsWith('/datasets'))return route.fulfill({json:{items:[dataset],total:1,page:1,page_size:100}});
     if(path.endsWith('/segments'))return route.fulfill({json:{items:[{id:revision,revision_id:revision,name:'휴면 VIP'}],total:1,page:1,page_size:100}});
     if(path.endsWith('/copy-policy'))return route.fulfill({json:{version:1,channels:{EMAIL:{subject_max:120,body_max:5000},PUSH:{subject_max:60,body_max:300},SMS:{subject_max:0,body_max:500}}}});
@@ -108,6 +117,7 @@ test('approved campaign starts one simulated run and shows completion',async ({p
   await page.goto(`/#/campaigns?dataset=${id}`);
   await expect(page.getByText('승인 캠페인',{exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'모의 발송',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'AI 분석',exact:true})).toBeDisabled();
   await expect(page.getByRole('button',{name:'삭제',exact:true})).toBeEnabled();
   await page.getByRole('button',{name:'모의 발송',exact:true}).click();
   await expect.poll(()=>key).toBeTruthy();
@@ -118,4 +128,34 @@ test('approved campaign starts one simulated run and shows completion',async ({p
   await expect(page.locator('.campaign-results').getByText('A안',{exact:true})).toBeVisible();
   await expect(page.locator('.campaign-results').getByText('전환',{exact:true})).toBeVisible();
   await expect(page.getByText('✓ 발송 완료',{exact:true})).toBeVisible();
+  await expect(page.locator('.performance-summary').getByRole('button',{name:'✦ AI 성과 분석 요청',exact:true})).toBeVisible();
+  await expect(page.locator('.campaign-results > .ai-performance')).toHaveCount(0);
+  await expect(page.locator('.performance-summary .ai-performance-output')).toBeHidden();
+  await page.screenshot({path:'test-results/campaign-analysis-cta.png',fullPage:true});
+  await page.locator('.performance-summary').getByRole('button',{name:'✦ AI 성과 분석 요청',exact:true}).click();
+  await expect(page).toHaveURL(/tab=ai-analysis/);
+  await expect(page.getByRole('button',{name:'AI 분석',exact:true})).toHaveAttribute('aria-current','page');
+  await expect(page.getByRole('region',{name:'성과 요약'})).toBeVisible();
+  await expect(page.locator('.analysis-facts')).toContainText('14명');
+  await expect(page.locator('.analysis-interpretation')).toBeVisible();
+  await expect(page.locator('.analysis-grid > *')).toHaveCount(2);
+  expect(analyses).toBe(1);
+  await page.getByRole('button',{name:'발송·결과',exact:true}).click();
+  await page.getByRole('button',{name:'✦ AI 분석 결과 보기',exact:true}).click();
+  await expect(page.getByRole('region',{name:'성과 요약'})).toBeVisible();expect(analyses).toBe(1);
+  await page.getByRole('button',{name:'다시 분석',exact:true}).click();
+  await expect.poll(()=>analyses).toBe(2);
+  await expect(page.locator('.analysis-followup')).toBeVisible();
+  await page.getByRole('button',{name:'확인 후 후속 초안 저장',exact:true}).click();
+  await expect(page.getByRole('button',{name:'저장된 초안 열기'})).toBeVisible();
+  await page.screenshot({path:'test-results/campaign-ai-tab.png',fullPage:true});
+  await page.getByRole('button',{name:'발송·결과',exact:true}).click();
+  await page.getByRole('button',{name:'AI 분석',exact:true}).click();
+  await expect(page.getByRole('button',{name:'저장된 초안 열기'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'확인 후 후속 초안 저장'})).toHaveCount(0);
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  await page.reload();
+  await expect(page).toHaveURL(/tab=ai-analysis/);
+  await expect(page.getByRole('button',{name:'AI 분석',exact:true})).toHaveAttribute('aria-current','page');
 });

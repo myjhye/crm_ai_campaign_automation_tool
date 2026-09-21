@@ -22,6 +22,8 @@ test('experiments explain why an A/B winner is on hold',async({page})=>{
   await expect(page.getByText('결론: 판단 보류')).toBeVisible();await expect(page.getByText('캠페인 결과 열기',{exact:true})).toBeVisible();
   await expect(page.getByText(/관찰 기간 진행 중 · 표본 부족/)).toBeVisible();
   await expect(page.getByRole('table',{name:'실험 통계 상세'})).toBeVisible();
+  await expect(page.locator('.experiment-card .ai-performance')).toHaveClass(/is-pending/);
+  await expect(page.getByText('결과 해석이 어려우신가요? AI가 도와드립니다')).toBeVisible();
 });
 test('experiments emphasize a statistically significant winner and its basis',async({page})=>{
   await page.route('**/api/v1/reports/campaigns?*',route=>route.fulfill({json:{items:[{...item,experiment:{...experiment,status:'WINNER',winner:'A',reasons:[],absolute_difference_pp:-12.5,p_value:.0123}}],total:1,page:1,page_size:20}}));
@@ -29,6 +31,7 @@ test('experiments emphasize a statistically significant winner and its basis',as
   await expect(page.getByText('결론: A안 우세')).toBeVisible();
   await expect(page.getByText('A안이 B안보다 전환율 12.50%p 높습니다 · 95% 유의수준 기준 유의')).toBeVisible();
   await expect(page.locator('.experiment-bar').last()).toHaveClass(/is-leader/);
+  await expect(page.getByText('AI가 분석하고 후속 캠페인 초안을 제안합니다')).toBeVisible();
 });
 test('experiments render no significant difference as a neutral verdict and collapse duplicate names',async({page})=>{
   const noDifference={...experiment,status:'HOLD',winner:null,reasons:['NO_SIGNIFICANT_DIFFERENCE'],absolute_difference_pp:-1.13,p_value:.27};
@@ -45,5 +48,77 @@ test('experiments render no significant difference as a neutral verdict and coll
   await expect(page.getByText('자세히 보기',{exact:true})).toHaveCount(0);
   await expect(page.getByText(/A안 95% CI/)).toBeVisible();
   await expect(page.getByText('0.27',{exact:true})).toBeVisible();
+  await expect(page.getByText('결과와 다음 실험 방향을 AI에게 물어보세요')).toBeVisible();
   await page.screenshot({path:'test-results/experiments-conclusion.png',fullPage:true});
+});
+
+test('AI analysis separates evidence and hypotheses and saves only after confirmation',async({page})=>{
+  let analyses=0,saves=0;
+  await page.route('**/api/v1/ai/performance-analysis',async route=>{
+    analyses++;const body=route.request().postDataJSON();
+    expect(body.campaign_id).toBe(campaignId);expect(body.dataset_id).toBe(datasetId);
+    await route.fulfill({json:{result_type:'performance_analysis',mode:'mock',data:{campaign_id:campaignId,
+      reference_at:'2026-09-20T00:00:00Z',experiment,
+      facts:[{metric_id:'A.conversion_rate',label:'A안 전환율',value:'4',unit:'%'}],
+      hypotheses:['문안 차이의 영향은 검증 전 가설입니다.'],limitations:['모의 성과이며 실제 사업 성과가 아닙니다.'],
+      recommended_actions:[{code:'RETEST',text:'표본을 늘려 재검증하세요.'}],
+      proposal:{proposal_id:'55555555-5555-4555-8555-555555555555',expires_at:'2099-09-20T00:30:00Z',draft:{name:'후속 실험',channel:'EMAIL',benefit:'15% 할인 쿠폰',variants:[{variant_name:'A',allocation_bp:5000,subject:'A 제목',body:'기존 혜택 문안'},{variant_name:'B',allocation_bp:5000,subject:'B 제목',body:'기존 관계 문안'}]}}}}});
+  });
+  await page.route('**/api/v1/ai/actions/*/confirm',async route=>{
+    saves++;expect(route.request().postDataJSON()).toEqual({dataset_id:datasetId});
+    await route.fulfill({json:{id:'66666666-6666-4666-8666-666666666666',status:'DRAFT'}});
+  });
+  await page.goto(`/#/experiments?dataset=${datasetId}&from=2026-09-01&to=2026-09-20`);
+  const cta=page.locator('.experiment-card .ai-performance');
+  const requestButton=cta.getByRole('button',{name:'✦ AI 성과 분석 요청',exact:true});
+  await expect(cta.locator('.ai-performance-output')).toBeHidden();
+  await expect(page.getByRole('button',{name:'캠페인 결과 열기'})).toBeVisible();
+  await requestButton.click();
+  await expect(page).toHaveURL(new RegExp(`/experiments/${campaignId}.*tab=ai-analysis`));
+  await expect(page.getByRole('heading',{name:'💡 AI 해석'})).toBeVisible();
+  await expect(page.getByRole('region',{name:'성과 요약'})).toContainText('4%');
+  await expect(page.locator('.analysis-limits')).not.toHaveAttribute('open','');
+  await expect(page.locator('.analysis-copy-variant')).toHaveCount(2);
+  await expect(page.locator('.experiment-card')).toHaveCount(0);
+  await expect(page.getByText('기존 혜택 문안')).toBeVisible();
+  expect(analyses).toBe(1);expect(saves).toBe(0);
+  await page.getByRole('button',{name:'확인 후 후속 초안 저장'}).click();
+  await expect(page.getByText(/후속 캠페인 초안을 저장했습니다/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'저장된 초안 열기'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'확인 후 후속 초안 저장'})).toHaveCount(0);
+  expect(saves).toBe(1);
+  await page.getByRole('button',{name:'실험 결과',exact:true}).click();
+  await page.getByRole('button',{name:'✦ AI 분석 결과 보기',exact:true}).click();
+  await expect(page.getByRole('button',{name:'저장된 초안 열기'})).toBeVisible();
+  expect(analyses).toBe(1);
+  await page.getByRole('button',{name:'다시 분석',exact:true}).click();
+  await expect(page.getByRole('button',{name:'확인 후 후속 초안 저장'})).toBeVisible();
+  expect(analyses).toBe(2);
+  await page.screenshot({path:'test-results/ai-performance.png',fullPage:true});
+});
+
+test('failed AI analysis leaves manual statistics visible and allows retry',async({page})=>{
+  await page.route('**/api/v1/ai/performance-analysis',route=>route.fulfill({status:502,json:{error:{message:'분석을 검증하지 못했습니다.'}}}));
+  await page.goto(`/#/experiments?dataset=${datasetId}&from=2026-09-01&to=2026-09-20`);
+  await page.getByRole('button',{name:'✦ AI 성과 분석 요청',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('분석을 검증하지 못했습니다.');
+  await expect(page.getByRole('table',{name:'실험 통계 상세'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'✦ AI 성과 분석 요청',exact:true})).toBeEnabled();
+});
+
+test('chat uses the selected completed campaign without issuing a second analysis',async({page})=>{
+  let analysisCalls=0;
+  await page.route('**/api/v1/ai/status',route=>route.fulfill({json:{mode:'mock',available:true}}));
+  await page.route('**/api/v1/campaigns?*',route=>route.fulfill({json:{items:[{...item.campaign,version:5}],total:1,page:1,page_size:100}}));
+  await page.route('**/api/v1/ai/performance-analysis',route=>{analysisCalls++;return route.fulfill({status:500});});
+  await page.route('**/api/v1/ai/chat',route=>{
+    const body=route.request().postDataJSON();expect(body.analysis_campaign_id).toBe(campaignId);expect(body.validation_campaign_id).toBeUndefined();
+    return route.fulfill({json:{message:'성과의 근거를 확인해주세요.',dataset_id:datasetId,mode:'mock',result_type:'performance_analysis',reference_at:dataset.reference_at,data_version:1,
+      data:{campaign_id:campaignId,reference_at:dataset.reference_at,experiment,facts:[{label:'전체 전달 고객',value:'100',unit:'명'}],hypotheses:[],limitations:['합성 데이터입니다.'],recommended_actions:[{code:'REVIEW_COPY',text:'문안을 검토하세요.'}],proposal:null}}});
+  });
+  await page.goto(`/#/ai?dataset=${datasetId}&from=2026-09-01&to=2026-09-20`);
+  await page.getByLabel('성과 분석할 캠페인').selectOption(campaignId);
+  await page.getByRole('button',{name:'전송',exact:true}).click();
+  await expect(page.getByText('전체 전달 고객: 100명')).toBeVisible();
+  expect(analysisCalls).toBe(0);
 });

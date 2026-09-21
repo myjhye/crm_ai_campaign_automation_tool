@@ -3,6 +3,7 @@ import {request, isUUID} from '../../api/client.js';
 import {store} from '../../app/store.js';
 import {apiPeriod, navigate} from '../../app/router.js';
 import {renderPreview} from '../segments/preview.js';
+import {performanceAssistant} from './performance.js';
 
 const examples = ['활성 고객 수를 알려줘', '60일 미구매, 누적 30만원 이상, 이메일 동의 고객을 저장할 초안으로 만들어줘'];
 const labels = {total_customers:'전체 고객', active_customers:'활성 고객', new_customers:'신규 고객', dormant_customers:'휴면 고객', purchase_conversion_rate:'구매 전환율', repeat_purchase_rate:'재구매율'};
@@ -19,6 +20,8 @@ export function renderAI(root, pageSignal) {
   const campaignHint = el('p',{className:'small muted',text:'작성 중인 캠페인을 선택하면 AI가 단계 8과 같은 정책 검수를 실행합니다.'});
   const validationContext = el('div',{className:'ai-validation-context'},
     el('label',{},el('span',{text:'캠페인 검수'}),campaignSelect),campaignHint);
+  const analysisSelect=el('select',{'aria-label':'성과 분석할 캠페인'},el('option',{value:'',text:'성과 분석 안 함'}));
+  validationContext.append(el('label',{},el('span',{text:'완료 캠페인 성과 분석'}),analysisSelect));
   const results = el('div', {className:'ai-messages', 'aria-live':'polite', role:'log'});
   const input = el('textarea', {id:'ai-input', rows:1, maxlength:2000, required:'', placeholder:'AI에게 요청하기'});
   const send = el('button', {className:'button', type:'submit', text:'전송', 'aria-label':'전송'});
@@ -80,7 +83,9 @@ export function renderAI(root, pageSignal) {
     if (!dataset) return;
     try {
       const page = await request(`/campaigns?dataset_id=${dataset.id}&page=1&page_size=100`,{signal:pageSignal});
-      for (const row of page.items || []) if (row.status === 'DRAFT') {
+      for (const row of page.items || []) {
+        if(row.status==='COMPLETED')analysisSelect.append(el('option',{value:row.id,text:row.name}));
+        if (row.status !== 'DRAFT')continue;
         campaigns.set(row.id,row);
         campaignSelect.append(el('option',{value:row.id,text:`${row.name} · ${row.channel}`}));
       }
@@ -89,7 +94,11 @@ export function renderAI(root, pageSignal) {
   };
   loadCampaigns();
   campaignSelect.addEventListener('change',()=>{
+    if(campaignSelect.value)analysisSelect.value='';
     if (campaignSelect.value) {input.value='선택한 캠페인을 정책 검수해줘'; resize(); input.focus();}
+  });
+  analysisSelect.addEventListener('change',()=>{
+    if(analysisSelect.value){campaignSelect.value='';input.value='성과를 분석하고 다음 실험을 제안해줘';resize();input.focus();}
   });
   form.addEventListener('submit', async event => {
     event.preventDefault(); if (busy) return;
@@ -105,11 +114,13 @@ export function renderAI(root, pageSignal) {
       const selectedCampaign=campaigns.get(campaignSelect.value);
       const response = await request('/ai/chat', {method:'POST', signal, body:{prompt, dataset_id:selectedDataset.id,
         ...apiPeriod(route.from, route.to), reference_at:selectedDataset.reference_at || apiPeriod(route.from, route.to).to,
-        ...(selectedCampaign?{validation_campaign_id:selectedCampaign.id,validation_campaign_version:selectedCampaign.version}:{})},
-        validate:r => ['metric','segment_preview','clarification','campaign_validation'].includes(r?.result_type) && typeof r.message === 'string' && r.data && isUUID(r.dataset_id)});
+        ...(selectedCampaign?{validation_campaign_id:selectedCampaign.id,validation_campaign_version:selectedCampaign.version}:{}),
+        ...(analysisSelect.value?{analysis_campaign_id:analysisSelect.value}:{})},
+        validate:r => ['metric','segment_preview','clarification','campaign_validation','performance_analysis'].includes(r?.result_type) && typeof r.message === 'string' && r.data && isUUID(r.dataset_id)});
       if (signal.aborted) return;
       const data = response.data;
       const card = el('section', {className:'ai-result'}, el('p', {text:response.message}));
+      if(response.result_type==='performance_analysis')card.append(performanceAssistant({route,signal,campaignId:data.campaign_id,initialResult:response}));
       if (response.result_type === 'metric') {
         for (const [key, metric] of Object.entries(data.metrics)) card.append(el('h3', {text:labels[key] || key}),
           el('strong', {text:metric.value === null ? '집계할 데이터가 없습니다' : `${metric.value.toLocaleString('ko-KR')}${metric.unit === 'percent' ? '%' : '명'}`}));

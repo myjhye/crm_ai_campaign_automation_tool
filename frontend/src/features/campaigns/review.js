@@ -1,6 +1,7 @@
 import {el, button, errorMessage, formatTime} from '../../components/dom.js';
 import {request} from '../../api/client.js';
 import {apiPeriod} from '../../app/router.js';
+import {campaignAnalysis} from './analysis.js';
 
 const labels={WITHDRAWN:'탈퇴',NO_CONSENT:'채널 미동의',INVALID_CONTACT:'연락처 없음·오류',EXCLUDED_SEGMENT:'제외 세그먼트',DUPLICATE_CAMPAIGN:'기수신',DAILY_LIMIT:'일일 한도 초과',WEEKLY_LIMIT:'피로도 초과'};
 const failureLabels={WITHDRAWN:'발송 시점 탈퇴',NO_CONSENT:'발송 시점 동의 철회',INVALID_CONTACT:'연락처 없음·오류',DUPLICATE_CAMPAIGN:'기수신',DAILY_LIMIT:'일일 한도 초과',WEEKLY_LIMIT:'피로도 초과',SYSTEM_ERROR:'시뮬레이터 전송 실패'};
@@ -11,6 +12,8 @@ export function campaignReview({route,signal,getCampaign,onCampaign,onRun=()=>{}
   const panel=el('section',{className:'card campaign-review-panel campaign-tab-panel','aria-label':'정책 검수와 승인'});
   const resultsPanel=el('section',{className:'campaign-results campaign-tab-panel','aria-label':'발송과 결과'});
   let state=null,busy=false,activeRun=null,performance=null,pollTimer=null,idempotencyKey=null;
+  const analysisPanels=new Map();
+  const aiPanel=el('section',{className:'campaign-tab-panel','aria-label':'AI 분석 탭'});
   const referenceAt=()=>new Date(`${route.to}T23:59:59+09:00`).toISOString();
   async function call(path,body) {
     if (busy) return; busy=true; draw();
@@ -85,6 +88,12 @@ export function campaignReview({route,signal,getCampaign,onCampaign,onRun=()=>{}
 
   function metric(label,value,tone=''){return el('div',{className:`run-metric ${tone}`},el('span',{text:label}),el('strong',{text:`${number(value)}명`}));}
   function drawResults(campaign){
+    let analysis=null;
+    if(campaign?.status==='COMPLETED'){
+      const key=`${campaign.id}:${campaign.version}`;
+      if(!analysisPanels.has(key))analysisPanels.set(key,campaignAnalysis({route,signal,campaign}));
+      analysis=analysisPanels.get(key);aiPanel.replaceChildren(analysis.panel);
+    }else aiPanel.replaceChildren();
     if(!campaign){resultsPanel.replaceChildren(el('div',{className:'card'},el('h2',{text:'발송·결과'}),el('p',{className:'muted',text:'캠페인을 선택해주세요.'})));return;}
     const variants=campaign.variants||[],run=activeRun;
     const segmentName=getSegmentName(campaign.segment_revision_id)||'저장된 대상 세그먼트';
@@ -99,7 +108,11 @@ export function campaignReview({route,signal,getCampaign,onCampaign,onRun=()=>{}
     if(performance){const totals=performance.totals,test=performance.experiment;children.push(el('section',{className:'card performance-summary'},el('div',{className:'panel-heading'},el('h3',{text:'성과와 A/B 판단'}),el('span',{className:`badge ${test.winner?'status-completed':'status-review'}`,text:test.winner?`${test.winner}안 우세`:'판단 보류'})),
       el('div',{className:'run-result-grid'},el('div',{},el('span',{className:'small muted',text:'클릭률'}),el('strong',{text:totals.click_rate.value==null?'—':`${totals.click_rate.value}%`})),el('div',{},el('span',{className:'small muted',text:'전환율'}),el('strong',{text:totals.conversion_rate.value==null?'—':`${totals.conversion_rate.value}%`})),el('div',{},el('span',{className:'small muted',text:'기여 매출'}),el('strong',{text:`${number(totals.revenue)}원`})),el('div',{},el('span',{className:'small muted',text:'B−A 전환 차이'}),el('strong',{text:test.absolute_difference_pp==null?'—':`${test.absolute_difference_pp}%p`}))),
       el('p',{className:'small muted',text:`7일 마지막 클릭 귀속 · ${performance.observation.complete?'관찰 완료':'관찰 진행 중'} · 증분 지표 제공 불가`})))}
-    resultsPanel.replaceChildren(...children);resultsPanel.querySelectorAll('button').forEach(node=>node.disabled=busy);
+    if(campaign.status==='COMPLETED'&&performance){
+      children.find(child=>child.classList.contains('performance-summary')).append(analysis.entry);
+    }
+    resultsPanel.replaceChildren(...children);
+    resultsPanel.querySelectorAll('button').forEach(node=>{if(!node.closest('.ai-performance'))node.disabled=busy;});
   }
   function draw(){const campaign=getCampaign();drawReview(campaign);drawResults(campaign);}
   async function load(){
@@ -107,5 +120,5 @@ export function campaignReview({route,signal,getCampaign,onCampaign,onRun=()=>{}
     state=await request(`/campaigns/${campaign.id}/review?dataset_id=${route.dataset}`,{signal});if(!state?.campaign?.id)throw new Error('검수 상태 응답 형식이 올바르지 않습니다.');onCampaign(state.campaign);
     if(['APPROVED','RUNNING','COMPLETED'].includes(state.campaign.status))await loadRun(state.campaign);else{activeRun=null;performance=null;}draw();schedulePoll();
   }
-  draw();return {panel,resultsPanel,load,draw,simulate,resumeEditing};
+  draw();return {panel,resultsPanel,aiPanel,load,draw,simulate,resumeEditing};
 }

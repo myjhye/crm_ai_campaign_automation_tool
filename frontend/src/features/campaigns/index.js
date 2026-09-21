@@ -287,20 +287,22 @@ export async function renderCampaigns(root, route, signal) {
   });
   const defaultTab=current&&['APPROVED','RUNNING','COMPLETED'].includes(current.status)?'results':current?.status==='REVIEW'?'review':'compose';
   const requestedTab=route.tab||defaultTab;
-  const selectedTab=requestedTab==='results'&&current&&!['APPROVED','RUNNING','COMPLETED'].includes(current.status)?'compose':requestedTab==='review'&&!current?'compose':requestedTab;
+  const selectedTab=requestedTab==='ai-analysis'&&current?.status!=='COMPLETED'?'compose':requestedTab==='results'&&current&&!['APPROVED','RUNNING','COMPLETED'].includes(current.status)?'compose':requestedTab==='review'&&!current?'compose':requestedTab;
   const tabList=el('nav',{className:'campaign-tabs','aria-label':'캠페인 작업 단계'});
   const tabButtons=new Map();
-  for(const [id,label] of [['compose','작성'],['review','검수·승인'],['results','발송·결과']]){
+  for(const [id,label] of [['compose','작성'],['review','검수·승인'],['results','발송·결과'],['ai-analysis','AI 분석']]){
     const control=button(label,()=>navigate({view:'campaigns',resource:current?.id||'',tab:id}),signal,'button campaign-tab');
     control.setAttribute('aria-current',selectedTab===id?'page':'false');tabButtons.set(id,control);tabList.append(control);
   }
   updateTabs=()=>{
     tabButtons.get('review').disabled=!current;
     tabButtons.get('results').disabled=!current||!['APPROVED','RUNNING','COMPLETED'].includes(current.status);
+    tabButtons.get('ai-analysis').disabled=current?.status!=='COMPLETED';
   };updateTabs();
   const composePanel=el('div',{className:'campaign-compose-tab',hidden:selectedTab==='compose'?null:''},el('div',{className:'campaign-compose-layout'},el('div',{className:'stack'},form,review),assistant));
   reviewFlow.panel.hidden=selectedTab!=='review';reviewFlow.resultsPanel.hidden=selectedTab!=='results';
-  const activePanel=el('div',{className:'campaign-active-panel'},composePanel,reviewFlow.panel,reviewFlow.resultsPanel);
+  reviewFlow.aiPanel.hidden=selectedTab!=='ai-analysis';
+  const activePanel=el('div',{className:'campaign-active-panel'},composePanel,reviewFlow.panel,reviewFlow.resultsPanel,reviewFlow.aiPanel);
   root.replaceChildren(heading('Campaigns','캠페인 작성부터 승인과 모의 발송 결과까지 관리하세요.',button('초기화',() => {
     if (route.resource) navigate({resource:''}); else {current = null; populate(null); notice.textContent = ''; review.hidden = true;}
   },signal)),tabList,el('div',{className:'campaign-tab-workspace'},activePanel,list));

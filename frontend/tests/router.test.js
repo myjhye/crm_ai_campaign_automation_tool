@@ -21,7 +21,10 @@ test('campaign tab is preserved and restricted to known workflow tabs', () => {
   const id = '11111111-1111-4111-8111-111111111111';
   const route = parseRoute(`#/campaigns/${id}?dataset=${id}&tab=results`);
   assert.equal(route.tab, 'results');
-  assert.match(routeHash(route), /tab=results/);
+    assert.match(routeHash(route), /tab=results/);
+    const analysis=parseRoute(`#/campaigns/${id}?dataset=${id}&tab=ai-analysis`);
+    assert.equal(analysis.issues.length,0);
+    assert.match(routeHash(analysis),/tab=ai-analysis/);
   assert.ok(parseRoute(`#/campaigns/${id}?dataset=${id}&tab=unknown`).issues.length);
 });
 
