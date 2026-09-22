@@ -52,7 +52,7 @@ def plan(database,settings,query,request_id,provider=None):
         status='SUCCESS'
     finally:
         with database.sessions.begin() as session:
-            session.add(AIExecutionLog(dataset_id=query.dataset_id,request_id=request_id,provider=settings.ai_mode,
+            session.add(AIExecutionLog(dataset_id=query.dataset_id,request_id=request_id,provider=settings.ai_mode,conversation_id=query.conversation_id,
                 model=settings.ai_model if settings.ai_mode=='live' else 'fixture',prompt_version='ai-b-plan-1',
                 status=status,tool_name='plan_campaign',elapsed_ms=int((time.monotonic()-started)*1000),total_tokens=tokens))
     if name!='plan_campaign' or not isinstance(args,dict):raise AppError('AI_INVALID_BRIEF','캠페인 조건을 해석하지 못했습니다.',502)

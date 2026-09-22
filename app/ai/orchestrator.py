@@ -14,6 +14,7 @@ from app.schemas.segments import PreviewRequest, SegmentWrite
 from app.services import segments, analytics
 from app.services.datasets import require_dataset
 from app.schemas.policies import ValidationRequest
+from app.services.ai_context import resolve_hint, segment_hint, segment_options
 
 
 def payload_hash(payload):
@@ -24,7 +25,7 @@ def chat(database, settings, query, request_id, provider=None):
     if query.analysis_campaign_id:
         from app.ai.performance import analyze, PerformanceRequest
         return analyze(database,settings,PerformanceRequest(dataset_id=query.dataset_id,campaign_id=query.analysis_campaign_id,
-            start=query.start,end=query.end,prompt=query.prompt),request_id,provider)
+            start=query.start,end=query.end,prompt=query.prompt,conversation_id=query.conversation_id),request_id,provider)
     if query.campaign_brief or query.campaign_id:
         from app.ai.campaigns import propose
         return propose(database,settings,query,request_id,provider)
@@ -34,6 +35,8 @@ def chat(database, settings, query, request_id, provider=None):
     with database.sessions() as session:
         require_dataset(session, query.dataset_id)
         version = data_version(session, query.dataset_id)
+        hint = resolve_hint(session, query.dataset_id, query.context_hint)
+        options = segment_options(session, query.dataset_id)
         if query.validation_campaign_id:
             from app.services.campaigns import detail
             validation_campaign = detail(session, query.dataset_id, query.validation_campaign_id)
@@ -42,15 +45,40 @@ def chat(database, settings, query, request_id, provider=None):
     status, name, tokens = 'FAILED', None, 0
     try:
         prompt = safe_prompt(query.prompt)
+        safe_prompt(json.dumps([item['name'] for item in options], ensure_ascii=False))
         provider = provider or (MockProvider() if settings.ai_mode == 'mock' else OpenAIProvider(settings))
         context = {'from': query.start.isoformat(), 'to': query.end.isoformat(), 'reference_at': query.reference_at.isoformat()}
+        context.update(prior_context=hint, available_segments=options)
         if validation_campaign:
             context['validation_campaign'] = {key: validation_campaign[key] for key in ('id','name','channel','status','version')}
-        name, args, tokens = provider.plan(prompt, context)
+        if query.context_hint and hint is None:
+            name, args = 'clarify', {'question':'이전 대상이 변경되었거나 더 이상 사용할 수 없습니다. 대상부터 다시 선택해주세요.'}
+        else:
+            name, args, tokens = provider.plan(prompt, context)
         allowed = {'get_metric': {'metric'}, 'preview_segment': {'condition_json'}, 'create_segment_draft': {'name', 'condition_json'},
-                   'clarify': {'question'}, 'validate_campaign': set()}
+                   'clarify': {'question'}, 'validate_campaign': set(),
+                   'compare_campaigns': {'filter','sort','order','limit'},
+                   'prepare_campaign': {'channel','benefit','objective','brand_tone'}}
         if name not in allowed or not isinstance(args, dict) or set(args) != allowed[name]:
             raise ValueError('Invalid tool')
+        # Re-resolve references after the external call; never trust client labels.
+        with database.sessions() as check:
+            if query.context_hint and resolve_hint(check, query.dataset_id, query.context_hint) != hint:
+                name, args, hint = 'clarify', {'question':'이전 대상이 변경되었습니다. 대상을 다시 선택해주세요.'}, None
+        if name == 'prepare_campaign':
+            if not hint or hint['kind'] != 'segment': raise ValueError('Segment context required')
+            if not all(isinstance(value, str) for value in args.values()): raise ValueError('Invalid brief')
+            if not args['channel'] or not args['benefit']:
+                name, args = 'clarify', {'question':'채널과 혜택을 알려주세요. 예: 이메일로 15% 할인 쿠폰, 다정한 말투로 만들어줘. 기본 초안은 전환율 목표 5%, A/B 50:50으로 제안하며 저장 전에 검토할 수 있습니다.'}
+            else:
+                from app.ai.schemas import CampaignSetup
+                from app.ai.planning import plan
+                if ''.join(args['benefit'].split()) not in ''.join(prompt.split()):
+                    raise ValueError('Benefit must come from this request')
+                setup = CampaignSetup(segment_revision_id=hint['revision_id'], **args)
+                response = plan(database, settings, query.model_copy(update={'campaign_setup':setup}), request_id, provider)
+                status = 'SUCCESS'
+                return {**response, 'context_hint':hint, 'conversation_id':query.conversation_id}
         with database.sessions() as session:
             if name == 'validate_campaign':
                 if not validation_campaign: raise ValueError('Campaign context required')
@@ -65,7 +93,7 @@ def chat(database, settings, query, request_id, provider=None):
                 if args['metric'] not in METRICS: raise ValueError('Invalid metric')
                 result = analytics.overview(session, query.model_copy(update={'data_version': version}))
                 result['metrics'] = {args['metric']: result['metrics'][args['metric']]}
-                kind, message = 'metric', '선택한 기간의 지표입니다.'
+                kind, message = 'metric', '선택한 기간의 데이터셋 전체 지표입니다.'
             else:
                 require_dataset(session, query.dataset_id, lock=True)
                 if data_version(session, query.dataset_id) != version:
@@ -73,6 +101,12 @@ def chat(database, settings, query, request_id, provider=None):
                 if name == 'clarify':
                     if not isinstance(args['question'], str) or len(args['question']) > 1000: raise ValueError('Invalid question')
                     result, kind, message = {}, 'clarification', safe_prompt(args['question'])
+                elif name == 'compare_campaigns':
+                    from app.services.performance import compare_campaigns
+                    result = compare_campaigns(session, query.dataset_id, args, query.start, query.end, hint)
+                    kind, message = 'campaign_comparison', '선택한 발송 기간의 완료 캠페인을 비교했습니다.'
+                    ids = [str(row['campaign_id']) for row in result['campaigns']]
+                    hint = {'kind':'campaign_list','campaign_ids':ids,'label':f'위 {len(ids)}개 캠페인 기준으로'} if ids else None
                 else:
                     if not isinstance(args['condition_json'], str) or len(args['condition_json']) > 16000: raise ValueError('Invalid DSL')
                     payload = {'dataset_id': query.dataset_id, 'condition': json.loads(args['condition_json']),
@@ -92,14 +126,15 @@ def chat(database, settings, query, request_id, provider=None):
         status = 'SUCCESS'
         return {'message': message, 'result_type': kind, 'data': result, 'mode': settings.ai_mode,
                 'dataset_id': query.dataset_id, 'reference_at': query.reference_at, 'data_version': version,
-                'request_id': request_id}
+                'request_id': request_id, 'conversation_id':query.conversation_id, 'context_hint':hint}
     except (ValueError, TypeError, ValidationError):
         raise AppError('AI_INVALID_OUTPUT', 'AI 조건을 검증하지 못했습니다. 조건을 구체적으로 다시 입력해주세요.', 502) from None
     finally:
         with database.sessions.begin() as session:
             session.add(AIExecutionLog(dataset_id=query.dataset_id, request_id=request_id,
+                conversation_id=query.conversation_id,
                 provider=settings.ai_mode, model=settings.ai_model if settings.ai_mode == 'live' else 'fixture',
-                status=status, tool_name=name if name in ('get_metric', 'preview_segment', 'create_segment_draft', 'clarify', 'validate_campaign') else None,
+                status=status, tool_name=name if name in ('get_metric', 'preview_segment', 'create_segment_draft', 'clarify', 'validate_campaign', 'compare_campaigns', 'prepare_campaign') else None,
                 elapsed_ms=int((time.monotonic() - started) * 1000), total_tokens=tokens))
 
 
@@ -113,7 +148,8 @@ def confirm(session, proposal_id, dataset_id, request_id):
             if proposal.action_type != 'SEGMENT':
                 from app.services.campaigns import detail
                 return detail(session,dataset_id,proposal.campaign_id)
-            return segments.detail(session, dataset_id, proposal.segment_id)
+            result = segments.detail(session, dataset_id, proposal.segment_id)
+            return {**result, 'context_hint':segment_hint(result)}
         if proposal.expires_at <= datetime.now(timezone.utc):
             raise AppError('AI_PROPOSAL_EXPIRED', '제안이 만료되었습니다. 다시 요청해주세요.')
         if payload_hash(proposal.payload) != proposal.payload_hash or UUID(proposal.payload['dataset_id']) != dataset_id:
@@ -128,4 +164,4 @@ def confirm(session, proposal_id, dataset_id, request_id):
                                managed_transaction=True, created_source='AI')
         proposal.segment_id = result['id']
         proposal.confirmed_at = datetime.now(timezone.utc)
-        return result
+        return {**result, 'context_hint':segment_hint(result)}

@@ -216,7 +216,7 @@ def propose(database, settings, query, request_id, provider=None):
         raise AppError('AI_INVALID_COPY','생성된 카피가 혜택 또는 채널 기준에 맞지 않습니다. 조건을 구체화해 다시 요청해주세요.',502) from None
     finally:
         with database.sessions.begin() as session:
-            session.add(AIExecutionLog(dataset_id=query.dataset_id,request_id=request_id,provider=settings.ai_mode,
+            session.add(AIExecutionLog(dataset_id=query.dataset_id,request_id=request_id,provider=settings.ai_mode,conversation_id=query.conversation_id,
                 model=settings.ai_model if settings.ai_mode=='live' else 'fixture',prompt_version=CAMPAIGN_PROMPT_VERSION,status=status,
                 tool_name=operation,elapsed_ms=int((time.monotonic()-started)*1000),total_tokens=tokens))
 

@@ -3,6 +3,7 @@ from pydantic import BaseModel, ConfigDict, Field, AwareDatetime, model_validato
 from decimal import Decimal, InvalidOperation
 from app.schemas.analytics import AnalyticsQuery
 from typing import Literal
+from app.ai.workspace_schemas import ContextHint
 
 
 class CampaignBrief(BaseModel):
@@ -53,6 +54,8 @@ class ChatRequest(AnalyticsQuery):
     validation_campaign_id: UUID | None = None
     validation_campaign_version: int | None = Field(default=None, ge=1, strict=True)
     analysis_campaign_id: UUID | None = None
+    conversation_id: UUID | None = None
+    context_hint: ContextHint | None = None
 
     @model_validator(mode='after')
     def validation_context(self):

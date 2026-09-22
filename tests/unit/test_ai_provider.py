@@ -19,6 +19,11 @@ def test_live_wire_contract_and_retry(monkeypatch):
     assert len(requests) == 2
     assert requests[0]['store'] is False and requests[0]['parallel_tool_calls'] is False
     assert all(tool['strict'] for tool in requests[0]['tools'])
+    comparison=next(t for t in requests[0]['tools'] if t['name']=='compare_campaigns')
+    nested=comparison['parameters']['properties']['filter']
+    assert nested['additionalProperties'] is False
+    assert set(nested['required'])==set(nested['properties'])
+    assert not any(t['name']=='prepare_campaign' for t in requests[0]['tools'])
 
 
 def test_timeout_and_no_key(monkeypatch):

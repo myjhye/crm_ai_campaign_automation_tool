@@ -19,6 +19,24 @@ VALIDATION_TOOLS = [
     tool('validate_campaign', '선택한 캠페인의 대상자와 카피 정책을 검수하고 검수 기록을 남깁니다.', {}),
 ]
 
+COMPARE_TOOLS = [tool('compare_campaigns', '선택한 발송 기간의 완료 캠페인을 비교합니다. 카피와 고객 행은 조회하지 않습니다.', {
+    'filter': {'type': 'object', 'properties': {
+        'status': {'type': 'string', 'enum': ['COMPLETED']},
+        'channel': {'type': 'string', 'enum': ['EMAIL','PUSH','SMS','ANY']},
+        'segment_revision_id': {'type': 'string', 'description': '제공된 revision UUID 또는 전체 조회는 빈 문자열'},
+        'from': {'type': 'string', 'description': '시간대 포함 ISO8601 또는 화면 기간은 빈 문자열'},
+        'to': {'type': 'string', 'description': '종료 미포함 ISO8601 또는 화면 기간은 빈 문자열'}},
+        'required': ['status','channel','segment_revision_id','from','to'], 'additionalProperties': False},
+    'sort': {'type':'string','enum':['conversion_rate','click_rate','revenue','sent_count']},
+    'order': {'type':'string','enum':['desc','asc']}, 'limit': {'type':'integer','minimum':1,'maximum':10}})]
+
+# The segment is a server-resolved reference, never an ID supplied by the model.
+WORKFLOW_TOOLS = [tool('prepare_campaign', '현재 저장된 세그먼트로 확인 저장용 캠페인 제안을 준비합니다. 채널·혜택이 없으면 빈 문자열로 질문합니다.', {
+    'channel': {'type':'string','enum':['EMAIL','PUSH','SMS','']},
+    'benefit': {'type':'string','description':'이번 사용자 입력의 혜택 원문. 없으면 빈 문자열'},
+    'objective': {'type':'string','description':'캠페인 목표. 없으면 재구매 유도'},
+    'brand_tone': {'type':'string','description':'공통 말투. 없으면 다정하고 편안하게'}})]
+
 COPY_PROPERTIES = {
     'variants': {'type':'array','items':{'type':'object','properties':{
         'variant_name':{'type':'string','enum':['A','B']}, 'subject':{'type':'string'},

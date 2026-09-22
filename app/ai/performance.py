@@ -41,6 +41,7 @@ REASONS = {'OBSERVATION_OPEN':'관찰 기간 진행 중', 'INSUFFICIENT_SAMPLE':
 
 
 class PerformanceRequest(AnalyticsQuery):
+    conversation_id: UUID | None = None
     campaign_id: UUID
     prompt: str = Field(default='성과의 근거와 한계를 설명하고 다음 실험을 제안해주세요.', min_length=1, max_length=2000)
 
@@ -177,7 +178,7 @@ def analyze(database, settings, query, request_id, provider=None):
         raise AppError('AI_INVALID_ANALYSIS','AI 분석을 실제 지표와 대조하지 못했습니다. 다시 요청해주세요.',502) from None
     finally:
         with database.sessions.begin() as session:
-            session.add(AIExecutionLog(dataset_id=query.dataset_id,request_id=request_id,provider=settings.ai_mode,
+            session.add(AIExecutionLog(dataset_id=query.dataset_id,request_id=request_id,provider=settings.ai_mode,conversation_id=query.conversation_id,
                 model=settings.ai_model if settings.ai_mode=='live' else 'fixture',prompt_version=PROMPT_VERSION,
                 status=status,tool_name='analyze_campaign',elapsed_ms=int((time.monotonic()-started)*1000),total_tokens=tokens))
 

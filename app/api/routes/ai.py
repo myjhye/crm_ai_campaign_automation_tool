@@ -1,13 +1,25 @@
 from uuid import UUID
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Query
+from typing import Annotated
+from app.schemas.analytics import AnalyticsQuery
 from app.ai.schemas import ChatRequest, Confirmation
 from app.ai import orchestrator
 from app.core.errors import AppError
 from app.ai.campaigns import CopyRevision, revise
 from pydantic import ValidationError
 from app.ai.performance import PerformanceRequest, analyze
+from app.ai.workspace_schemas import InsightsResponse
 
 router = APIRouter(prefix='/ai', tags=['ai'])
+
+
+@router.get('/insights', response_model=InsightsResponse)
+def insights(query: Annotated[AnalyticsQuery, Query()], request: Request):
+    from app.services.insights import generate_insights
+    database = request.app.state.database
+    if database is None: raise AppError('DATABASE_UNAVAILABLE', 'DB 연결이 필요합니다.', 503)
+    with database.sessions() as session:
+        return generate_insights(session, query)
 
 
 @router.post('/performance-analysis')

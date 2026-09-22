@@ -34,6 +34,7 @@ class AIExecutionLog(IdentityMixin, Base):
     __tablename__ = 'ai_execution_logs'
     dataset_id: Mapped[UUID] = mapped_column(ForeignKey('datasets.id'))
     request_id: Mapped[UUID]
+    conversation_id: Mapped[UUID | None] = mapped_column(index=True)
     actor_type: Mapped[str] = mapped_column(String(20), default='VISITOR')
     provider: Mapped[str] = mapped_column(String(20))
     model: Mapped[str] = mapped_column(String(100))

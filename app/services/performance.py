@@ -85,3 +85,53 @@ def campaign_rows(session,dataset_id,start,end,observation_to=None):
     campaigns=session.scalars(select(Campaign).where(Campaign.dataset_id==dataset_id,Campaign.status=='COMPLETED').order_by(Campaign.created_at.desc())).all()
     rows=[campaign_performance(session,dataset_id,row.id,start,end,observation_to,include_archived=True) for row in campaigns]
     return [row for row in rows if row['totals']['sent_customers']>0]
+
+
+def compare_campaigns(session, dataset_id, args, default_from, default_to, context_hint=None):
+    """Compare sent cohorts, matching Reports. Rates are already percentages."""
+    from app.ai.workspace_schemas import CompareRequest
+    from app.schemas.common import ReportingPeriod
+    from app.models.campaigns import CampaignRun
+    from app.models.segments import Segment
+    from sqlalchemy import func
+    parsed = CompareRequest.model_validate(args)
+    period = ReportingPeriod(start=parsed.filter.start or default_from, end=parsed.filter.end or default_to)
+    require_dataset(session, dataset_id)
+    query = select(Campaign).where(Campaign.dataset_id == dataset_id, Campaign.status == 'COMPLETED', Campaign.archived_at.is_(None))
+    if parsed.filter.channel != 'ANY':
+        query = query.where(Campaign.channel == parsed.filter.channel)
+    revision_id = parsed.filter.segment_revision_id
+    if revision_id:
+        revision = session.scalar(select(SegmentRevision).join(Segment, Segment.id == SegmentRevision.segment_id).where(
+            SegmentRevision.dataset_id == dataset_id, SegmentRevision.id == UUID(revision_id), Segment.archived_at.is_(None)))
+        if revision is None:
+            raise AppError('INVALID_SEGMENT', '이 데이터셋의 세그먼트를 선택해주세요.', 422)
+        query = query.where(Campaign.segment_revision_id == revision.id)
+    if context_hint:
+        if context_hint['kind'] == 'campaign_list':
+            query = query.where(Campaign.id.in_([UUID(i) for i in context_hint['campaign_ids']]))
+        elif context_hint['kind'] == 'segment':
+            query = query.where(Campaign.segment_revision_id == UUID(context_hint['revision_id']))
+    # Bound expensive attribution work before processing reports, not just output size.
+    ids_with_sends = select(CampaignDelivery.campaign_id).where(CampaignDelivery.dataset_id == dataset_id,
+        CampaignDelivery.status == 'SENT', CampaignDelivery.sent_at >= period.start, CampaignDelivery.sent_at < period.end)
+    rows = session.scalars(query.where(Campaign.id.in_(ids_with_sends)).order_by(Campaign.id).limit(101)).all()
+    if len(rows) > 100:
+        raise AppError('AI_COMPARE_TOO_BROAD', '비교할 캠페인이 많습니다. 채널·세그먼트·기간을 좁혀주세요.', 422)
+    cutoff = datetime.now(timezone.utc)
+    finished = dict(session.execute(select(CampaignRun.campaign_id, func.max(CampaignRun.finished_at)).where(
+        CampaignRun.dataset_id == dataset_id, CampaignRun.campaign_id.in_([r.id for r in rows]),
+        CampaignRun.status == 'COMPLETED').group_by(CampaignRun.campaign_id)).all()) if rows else {}
+    reports = []
+    for campaign in rows:
+        report = campaign_performance(session, dataset_id, campaign.id, period.start, period.end, cutoff)
+        total = report['totals']
+        reports.append({'campaign_id': str(campaign.id), 'name': campaign.name, 'channel': campaign.channel,
+            'sent_count': total['sent_customers'], 'conversion_rate': total['conversion_rate']['value'],
+            'click_rate': total['click_rate']['value'], 'revenue': total['revenue'],
+            'completed_at': finished.get(campaign.id)})
+    valid = [r for r in reports if r[parsed.sort] is not None]
+    valid.sort(key=lambda r: Decimal(str(r[parsed.sort])), reverse=parsed.order == 'desc')
+    ordered = valid + [r for r in reports if r[parsed.sort] is None]
+    return {'campaigns': ordered[:parsed.limit], 'total_matched': len(reports),
+        'from': period.start, 'to': period.end, 'reference_at': cutoff, 'sort': parsed.sort, 'order': parsed.order}
