@@ -2,6 +2,8 @@
 
 Python 3.11 이상을 사용하는 FastAPI 백엔드 기본 프로젝트입니다.
 
+`/#/ai`의 AI 어시스턴트는 실제 집계 인사이트에서 시작해 고객 조건 조회 → 세그먼트 확인 저장 → 캠페인 초안 제안으로 이어집니다. 완료 캠페인을 전환율·클릭률·매출·발송 수로 비교할 수 있으며, 업무 저장에는 별도 확인이 필요합니다. 대화는 현재 브라우저 메모리에서만 유지되고 데이터셋·기간 변경 또는 새로고침 시 초기화됩니다. [구현 파일과 검증 안내](docs/ai_assistant_workspace.md)
+
 ## 설치 및 실행 (Windows PowerShell)
 
 설치와 `.env` 설정을 한 번 마친 뒤에는 VS Code에서 **Ctrl + Shift + P → Tasks: Run Task(작업: 작업 실행) → GrowthPilot: 서버와 화면 실행**을 선택합니다. PostgreSQL 시작 → 마이그레이션 → FastAPI 실행 → 기본 브라우저 열기까지 자동으로 진행합니다. Docker Desktop은 먼저 실행해두세요.
