@@ -106,19 +106,19 @@ test('failed AI analysis leaves manual statistics visible and allows retry',asyn
   await expect(page.getByRole('button',{name:'✦ AI 성과 분석 요청',exact:true})).toBeEnabled();
 });
 
-test('chat uses the selected completed campaign without issuing a second analysis',async({page})=>{
+test('workspace directs individual analysis to campaign screens',async({page})=>{
   let analysisCalls=0;
   await page.route('**/api/v1/ai/status',route=>route.fulfill({json:{mode:'mock',available:true}}));
   await page.route('**/api/v1/campaigns?*',route=>route.fulfill({json:{items:[{...item.campaign,version:5}],total:1,page:1,page_size:100}}));
   await page.route('**/api/v1/ai/performance-analysis',route=>{analysisCalls++;return route.fulfill({status:500});});
   await page.route('**/api/v1/ai/chat',route=>{
-    const body=route.request().postDataJSON();expect(body.analysis_campaign_id).toBe(campaignId);expect(body.validation_campaign_id).toBeUndefined();
-    return route.fulfill({json:{message:'성과의 근거를 확인해주세요.',dataset_id:datasetId,mode:'mock',result_type:'performance_analysis',reference_at:dataset.reference_at,data_version:1,
-      data:{campaign_id:campaignId,reference_at:dataset.reference_at,experiment,facts:[{label:'전체 전달 고객',value:'100',unit:'명'}],hypotheses:[],limitations:['합성 데이터입니다.'],recommended_actions:[{code:'REVIEW_COPY',text:'문안을 검토하세요.'}],proposal:null}}});
+    const body=route.request().postDataJSON();expect(body.analysis_campaign_id).toBeUndefined();expect(body.validation_campaign_id).toBeUndefined();
+    return route.fulfill({json:{message:'캠페인 화면에서 개별 성과 분석을 실행해주세요.',dataset_id:datasetId,mode:'mock',result_type:'clarification',data:{}}});
   });
   await page.goto(`/#/ai?dataset=${datasetId}&from=2026-09-01&to=2026-09-20`);
-  await page.getByLabel('성과 분석할 캠페인').selectOption(campaignId);
+  await expect(page.getByLabel('성과 분석할 캠페인')).toHaveCount(0);
+  await page.getByLabel('AI에게 요청하기',{exact:true}).fill('개별 캠페인 분석');
   await page.getByRole('button',{name:'전송',exact:true}).click();
-  await expect(page.getByText('전체 전달 고객: 100명')).toBeVisible();
+  await expect(page.getByText('캠페인 화면에서 개별 성과 분석을 실행해주세요.')).toBeVisible();
   expect(analysisCalls).toBe(0);
 });
