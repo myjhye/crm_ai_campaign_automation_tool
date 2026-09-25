@@ -42,6 +42,7 @@ class CompareFilter(BaseModel):
 
 class CompareRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    scope: Literal['dataset', 'context'] = 'dataset'
     filter: CompareFilter
     sort: Literal['conversion_rate', 'click_rate', 'revenue', 'sent_count']
     order: Literal['desc', 'asc']

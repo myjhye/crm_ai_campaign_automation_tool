@@ -53,11 +53,21 @@ def chat(database, settings, query, request_id, provider=None):
             context['validation_campaign'] = {key: validation_campaign[key] for key in ('id','name','channel','status','version')}
         if query.context_hint and hint is None:
             name, args = 'clarify', {'question':'이전 대상이 변경되었거나 더 이상 사용할 수 없습니다. 대상부터 다시 선택해주세요.'}
+        elif prompt.strip().rstrip('.?!') in ('이 세그먼트로 캠페인 초안 만들어', '이 세그먼트로 캠페인 초안 만들어줘'):
+            # The UI's explicit continuation must not depend on model tool selection.
+            name = 'clarify'
+            args = {'question': (f"‘{hint['name']}’ 대상으로 캠페인을 준비할게요. 사용할 채널과 혜택을 알려주세요. 예: 이메일로 15% 할인 쿠폰, 다정한 말투로 만들어줘."
+                if hint and hint['kind'] == 'segment' else '먼저 대상 세그먼트를 저장하고 해당 결과의 캠페인 초안 버튼을 눌러주세요.')}
         else:
             name, args, tokens = provider.plan(prompt, context)
+        if name == 'compare_campaigns' and isinstance(args,dict):
+            args={'scope':'dataset',**args}
+            from app.services.ai_context import comparison_scope
+            if args['scope'] in ('dataset','context'):
+                args['scope']=comparison_scope(prompt,args['scope'])
         allowed = {'get_metric': {'metric'}, 'preview_segment': {'condition_json'}, 'create_segment_draft': {'name', 'condition_json'},
                    'clarify': {'question'}, 'validate_campaign': set(),
-                   'compare_campaigns': {'filter','sort','order','limit'},
+                   'compare_campaigns': {'filter','sort','order','limit','scope'},
                    'prepare_campaign': {'channel','benefit','objective','brand_tone'}}
         if name not in allowed or not isinstance(args, dict) or set(args) != allowed[name]:
             raise ValueError('Invalid tool')
@@ -66,9 +76,10 @@ def chat(database, settings, query, request_id, provider=None):
             if query.context_hint and resolve_hint(check, query.dataset_id, query.context_hint) != hint:
                 name, args, hint = 'clarify', {'question':'이전 대상이 변경되었습니다. 대상을 다시 선택해주세요.'}, None
         if name == 'prepare_campaign':
-            if not hint or hint['kind'] != 'segment': raise ValueError('Segment context required')
-            if not all(isinstance(value, str) for value in args.values()): raise ValueError('Invalid brief')
-            if not args['channel'] or not args['benefit']:
+            if not hint or hint['kind'] != 'segment':
+                name, args = 'clarify', {'question':'캠페인 대상으로 사용할 세그먼트를 먼저 저장해주세요. 저장한 결과에서 캠페인 초안으로 이어갈 수 있습니다.'}
+            elif not all(isinstance(value, str) for value in args.values()): raise ValueError('Invalid brief')
+            elif not args['channel'] or not args['benefit']:
                 name, args = 'clarify', {'question':'채널과 혜택을 알려주세요. 예: 이메일로 15% 할인 쿠폰, 다정한 말투로 만들어줘. 기본 초안은 전환율 목표 5%, A/B 50:50으로 제안하며 저장 전에 검토할 수 있습니다.'}
             else:
                 from app.ai.schemas import CampaignSetup
@@ -79,6 +90,33 @@ def chat(database, settings, query, request_id, provider=None):
                 response = plan(database, settings, query.model_copy(update={'campaign_setup':setup}), request_id, provider)
                 status = 'SUCCESS'
                 return {**response, 'context_hint':hint, 'conversation_id':query.conversation_id}
+        if name in ('preview_segment', 'create_segment_draft'):
+            # Validate before opening the execution transaction. Retry malformed DSL once;
+            # never weaken the public validator or send customer rows/error input to the model.
+            original_tool = name
+            for attempt in range(2):
+                try:
+                    if not isinstance(args.get('condition_json'), str) or len(args['condition_json']) > 16000:
+                        raise ValueError('Invalid DSL')
+                    condition_payload = {'dataset_id':query.dataset_id, 'condition':json.loads(args['condition_json']),
+                        'reference_at':query.reference_at, 'data_version':version}
+                    PreviewRequest.model_validate(condition_payload)
+                    if name == 'create_segment_draft':
+                        SegmentWrite.model_validate({**condition_payload, 'name':safe_prompt(args['name'])})
+                    break
+                except (ValueError, TypeError, ValidationError):
+                    if attempt: raise
+                    repair = {**context, 'condition_repair': {
+                        'tool':original_tool,
+                        'instruction':'조건 형식을 검증하지 못했습니다. 등록된 field/comparison만 사용하고 정수·금액·boolean 타입을 확인하세요. 그룹은 operator/conditions만, 단일 조건은 field/comparison/value만 포함하세요.'}}
+                    retry_name, retry_args, retry_tokens = provider.plan(prompt, repair)
+                    tokens += retry_tokens
+                    if retry_name != original_tool or not isinstance(retry_args, dict) or set(retry_args) != allowed[original_tool]:
+                        raise ValueError('Invalid repair tool')
+                    args = retry_args
+            with database.sessions() as check:
+                if query.context_hint and resolve_hint(check, query.dataset_id, query.context_hint) != hint:
+                    raise AppError('DATA_VERSION_CONFLICT', '대상이 변경되었습니다. 다시 요청해주세요.')
         with database.sessions() as session:
             if name == 'validate_campaign':
                 if not validation_campaign: raise ValueError('Campaign context required')
@@ -104,7 +142,8 @@ def chat(database, settings, query, request_id, provider=None):
                 elif name == 'compare_campaigns':
                     from app.services.performance import compare_campaigns
                     result = compare_campaigns(session, query.dataset_id, args, query.start, query.end, hint)
-                    kind, message = 'campaign_comparison', '선택한 발송 기간의 완료 캠페인을 비교했습니다.'
+                    kind = 'campaign_comparison'
+                    message = '조건에 맞는 완료 캠페인이 없습니다.' if not result['campaigns'] else '선택한 발송 기간의 완료 캠페인을 비교했습니다.'
                     ids = [str(row['campaign_id']) for row in result['campaigns']]
                     hint = {'kind':'campaign_list','campaign_ids':ids,'label':f'위 {len(ids)}개 캠페인 기준으로'} if ids else None
                 else:

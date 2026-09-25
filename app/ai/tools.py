@@ -20,6 +20,7 @@ VALIDATION_TOOLS = [
 ]
 
 COMPARE_TOOLS = [tool('compare_campaigns', '선택한 발송 기간의 완료 캠페인을 비교합니다. 카피와 고객 행은 조회하지 않습니다.', {
+    'scope': {'type':'string','enum':['dataset','context'],'description':'일반 채널·기간 비교는 dataset. 사용자가 위 캠페인/그중/이 세그먼트처럼 이전 대상을 명시한 경우만 context.'},
     'filter': {'type': 'object', 'properties': {
         'status': {'type': 'string', 'enum': ['COMPLETED']},
         'channel': {'type': 'string', 'enum': ['EMAIL','PUSH','SMS','ANY']},

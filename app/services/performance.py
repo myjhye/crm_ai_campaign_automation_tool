@@ -107,7 +107,9 @@ def compare_campaigns(session, dataset_id, args, default_from, default_to, conte
         if revision is None:
             raise AppError('INVALID_SEGMENT', '이 데이터셋의 세그먼트를 선택해주세요.', 422)
         query = query.where(Campaign.segment_revision_id == revision.id)
-    if context_hint:
+    if parsed.scope == 'context' and not context_hint:
+        raise AppError('AI_COMPARE_CONTEXT_REQUIRED', '비교할 이전 대상이 없습니다. 전체 캠페인에서 조회하거나 대상을 먼저 선택해주세요.', 422)
+    if parsed.scope == 'context' and context_hint:
         if context_hint['kind'] == 'campaign_list':
             query = query.where(Campaign.id.in_([UUID(i) for i in context_hint['campaign_ids']]))
         elif context_hint['kind'] == 'segment':
@@ -134,4 +136,5 @@ def compare_campaigns(session, dataset_id, args, default_from, default_to, conte
     valid.sort(key=lambda r: Decimal(str(r[parsed.sort])), reverse=parsed.order == 'desc')
     ordered = valid + [r for r in reports if r[parsed.sort] is None]
     return {'campaigns': ordered[:parsed.limit], 'total_matched': len(reports),
+        'scope': parsed.scope, 'channel': parsed.filter.channel,
         'from': period.start, 'to': period.end, 'reference_at': cutoff, 'sort': parsed.sort, 'order': parsed.order}

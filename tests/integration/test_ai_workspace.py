@@ -15,6 +15,35 @@ pytestmark = pytest.mark.postgres
 COMPARE = '선택 기간에 발송된 완료 캠페인을 전환율 높은 순으로 비교해줘'
 
 
+@pytest.mark.parametrize('repair_ok', [True, False])
+def test_repeat_buyer_condition_repair_is_bounded_and_validated(ai_context, database, repair_ok):
+    import json
+    client, app, base = ai_context
+    class MalformedThenRetry:
+        calls = 0
+        def plan(self, prompt, context):
+            self.calls += 1
+            assert prompt == '완료 주문이 3건 이상인 반복 구매자를 찾아줘'
+            if self.calls == 2:
+                assert context['condition_repair']['tool'] == 'preview_segment'
+            return 'preview_segment', {'condition_json':json.dumps({
+                'field':'order_count', 'comparison':'GTE',
+                'value':3 if repair_ok and self.calls == 2 else '3'})}, 5
+    provider = MalformedThenRetry()
+    app.state.ai_provider = provider
+    response = client.post('/api/v1/ai/chat', json={**base,'prompt':'완료 주문이 3건 이상인 반복 구매자를 찾아줘'})
+    assert provider.calls == 2
+    assert response.status_code == (200 if repair_ok else 502), response.text
+    if repair_ok:
+        expected = client.post('/api/v1/segments/preview',json={'dataset_id':base['dataset_id'],
+            'reference_at':base['reference_at'],'condition':{'field':'order_count','comparison':'GTE','value':3}})
+        assert expected.status_code == 200, expected.text
+        assert response.json()['data']['count'] == expected.json()['count']
+    with database.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(Segment)) == 0
+        assert session.scalar(select(AIExecutionLog.total_tokens)) == 10
+
+
 def test_conversation_migration_roundtrip(database):
     from alembic import command
     from alembic.config import Config
@@ -62,9 +91,15 @@ def test_saved_segment_context_to_campaign_and_log(ai_context, database):
             return super().plan(prompt, context)
     app.state.ai_provider = Inspect()
     hint['label'] = 'CLIENT INSTRUCTION'
+    class MustNotCall:
+        def plan(self, prompt, context):
+            raise AssertionError('Explicit UI continuation must not call the model')
+    app.state.ai_provider = MustNotCall()
     ask = client.post('/api/v1/ai/chat',json={**base,'context_hint':hint,'prompt':'이 세그먼트로 캠페인 초안 만들어'})
     assert ask.status_code == 200, ask.text
     assert ask.json()['result_type'] == 'clarification'
+    assert saved['name'] in ask.json()['message']
+    app.state.ai_provider = Inspect()
     draft = client.post('/api/v1/ai/chat',json={**base,'context_hint':hint,'prompt':'이메일로 15% 할인 쿠폰, 다정한 말투로 만들어줘'})
     assert draft.status_code == 200, draft.text
     assert draft.json()['result_type'] == 'campaign_draft'
@@ -122,6 +157,7 @@ def test_compare_scoped_minimal_results_and_context(completed,database):
         other=Dataset(name='Other');session.add(other);session.flush();other_id=str(other.id)
     empty=client.post('/api/v1/ai/chat',json={**base,'dataset_id':other_id,'prompt':COMPARE})
     assert empty.json()['data']['campaigns']==[]
+    assert empty.json()['message']=='조건에 맞는 완료 캠페인이 없습니다.'
     invalid=client.post('/api/v1/ai/chat',json={**base,'dataset_id':other_id,'prompt':COMPARE,'context_hint':hint})
     assert invalid.json()['result_type']=='clarification'
 
@@ -160,6 +196,14 @@ def test_comparison_numeric_sort_limit_and_archive(completed,database):
     with database.sessions() as session:
         result=compare_campaigns(session,did,args,datetime.fromisoformat(query['from']),datetime.fromisoformat(query['to']))
         assert result['total_matched']==2 and len(result['campaigns'])==1
+        previous={'kind':'campaign_list','campaign_ids':[str(other)]}
+        args['scope']='dataset'
+        all_rows=compare_campaigns(session,did,args,datetime.fromisoformat(query['from']),datetime.fromisoformat(query['to']),previous)
+        assert all_rows['total_matched']==2
+        args['scope']='context'
+        scoped=compare_campaigns(session,did,args,datetime.fromisoformat(query['from']),datetime.fromisoformat(query['to']),previous)
+        assert scoped['total_matched']==1 and scoped['campaigns'][0]['campaign_id']==str(other)
+        args['scope']='dataset'
         assert result['campaigns'][0]['campaign_id']==str(original)
         args['order']='asc'
         result=compare_campaigns(session,did,args,datetime.fromisoformat(query['from']),datetime.fromisoformat(query['to']))

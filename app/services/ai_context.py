@@ -1,4 +1,5 @@
 """Rebuild resource context from scoped database records on every request."""
+import re
 from sqlalchemy import select
 from app.models.segments import Segment, SegmentRevision
 from app.models.campaigns import Campaign
@@ -39,3 +40,12 @@ def segment_options(session, dataset_id):
         Segment.dataset_id == dataset_id, Segment.archived_at.is_(None),
         SegmentRevision.version == Segment.version).order_by(Segment.id).limit(100)).all()
     return [{'revision_id': str(row.id), 'name': row.name} for row in rows]
+def comparison_scope(prompt, suggested='dataset'):
+    """Keep explicit scope words authoritative over a mistaken model scope choice."""
+    if re.search(r'(전체|모든)\s*(캠페인|데이터셋)|\ball campaigns\b', prompt, re.I):
+        return 'dataset'
+    if re.search(r'(위|그|이|방금|이전)\s*캠페인|그\s*중|이\s*세그먼트|방금\s*(나온|본|조회한|비교한)\s*(결과|캠페인)|\b(these|those|above|previous) campaigns\b|\bamong them\b', prompt, re.I):
+        return 'context'
+    if re.search(r'이메일|푸시|문자|\b(EMAIL|PUSH|SMS)\b', prompt, re.I):
+        return 'dataset'
+    return suggested
