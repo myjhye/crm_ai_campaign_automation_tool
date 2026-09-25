@@ -20,6 +20,10 @@ try {
         throw 'Missing .env. Copy .env.example and configure your database first.'
     }
 
+    Write-Host 'Checking PostgreSQL Python driver...'
+    & $pythonPath -m scripts.check_db_driver
+    if ($LASTEXITCODE -ne 0) { throw 'Database driver startup failed. Resolve the driver or Windows application control error shown above.' }
+
     # Fail before starting a browser if another process already owns this port.
     $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
     try { $probe.Start() }
