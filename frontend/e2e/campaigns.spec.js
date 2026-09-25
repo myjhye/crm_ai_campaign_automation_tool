@@ -1,5 +1,37 @@
 import {test,expect} from '@playwright/test';
 const id='11111111-1111-4111-8111-111111111111', revision='22222222-2222-4222-8222-222222222222', campaign='33333333-3333-4333-8333-333333333333';
+test('campaign library paginates 26 rows without replacing the draft form',async({page})=>{
+  const dataset={id,name:'샘플',source:'DEMO',purpose:'ANALYSIS',customer_count:100,order_count:300,event_count:2000,version:1,reference_at:'2026-09-19T00:00:00Z',created_at:'2026-09-19T00:00:00Z',updated_at:'2026-09-19T00:00:00Z'};
+  const rows=Array.from({length:26},(_,i)=>({id:`33333333-3333-4333-8333-${String(i+1).padStart(12,'0')}`,name:`캠페인 ${i+1}`,status:i%2?'COMPLETED':'DRAFT',channel:'EMAIL',version:1}));
+  await page.route('**/api/v1/**',route=>{
+    const url=new URL(route.request().url()),path=url.pathname;
+    if(path.endsWith('/datasets'))return route.fulfill({json:{items:[dataset],total:1,page:1,page_size:100}});
+    if(path.endsWith('/segments'))return route.fulfill({json:{items:[],total:0,page:1,page_size:100}});
+    if(path.endsWith('/copy-policy'))return route.fulfill({json:{version:1,channels:{EMAIL:{subject_max:120,body_max:5000},PUSH:{subject_max:60,body_max:300},SMS:{subject_max:0,body_max:500}}}});
+    if(path.endsWith('/status'))return route.fulfill({json:{mode:'mock',available:true}});
+    if(path.endsWith('/campaigns')){
+      const size=Number(url.searchParams.get('page_size')),number=Number(url.searchParams.get('page'));
+      const found=rows.filter(r=>r.name.includes(url.searchParams.get('q')||'')&&(!url.searchParams.get('status')||r.status===url.searchParams.get('status')));
+      return route.fulfill({json:{items:found.slice((number-1)*size,number*size),total:found.length,page:number,page_size:size}});
+    }
+    return route.fulfill({status:404,json:{error:{message:'Not found'}}});
+  });
+  await page.goto(`/#/campaigns?dataset=${id}`);
+  const library=page.getByRole('complementary',{name:'저장된 캠페인'});
+  await expect(library.locator('article')).toHaveCount(6);
+  await expect(library.getByText('1 / 5',{exact:true})).toBeVisible();
+  await page.getByLabel('캠페인 이름',{exact:true}).fill('작성 중인 초안');
+  await library.getByRole('button',{name:'다음',exact:true}).click();
+  await expect(library.getByText('2 / 5',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('캠페인 이름',{exact:true})).toHaveValue('작성 중인 초안');
+  await library.getByLabel('캠페인 검색').fill('26');
+  await library.getByRole('button',{name:'검색',exact:true}).click();
+  await expect(library.locator('article')).toHaveCount(1);
+  await expect(library.getByRole('button',{name:'다음',exact:true})).toBeDisabled();
+  await library.getByLabel('캠페인 상태 필터').selectOption('DRAFT');
+  await expect(library.locator('article')).toHaveCount(0);
+  await expect(page.getByLabel('캠페인 이름',{exact:true})).toHaveValue('작성 중인 초안');
+});
 test('campaign copy editor saves A/B, switches SMS and recovers conflict',async ({page}) => {
   let saved=null, conflict=false, validation=null;
   const dataset={id,name:'체험용 샘플',purpose:'ANALYSIS',source:'DEMO',customer_count:100,order_count:300,event_count:2000,version:1,reference_at:'2026-09-19T00:00:00Z',created_at:'2026-09-19T00:00:00Z',updated_at:'2026-09-19T00:00:00Z'};

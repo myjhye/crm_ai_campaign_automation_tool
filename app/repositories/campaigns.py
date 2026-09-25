@@ -14,7 +14,11 @@ def revisions(session, dataset_id, ids):
 
 
 def page(session, query):
-    where = (Campaign.dataset_id == query.dataset_id, Campaign.archived_at.is_(None))
+    where = [Campaign.dataset_id == query.dataset_id, Campaign.archived_at.is_(None)]
+    if query.q.strip():
+        where.append(Campaign.name.icontains(query.q.strip(), autoescape=True))
+    if query.status:
+        where.append(Campaign.status == query.status)
     total = session.scalar(select(func.count()).select_from(Campaign).where(*where))
     rows = session.scalars(select(Campaign).where(*where).order_by(Campaign.created_at.desc(), Campaign.id).offset(query.offset).limit(query.page_size)).all()
     return rows, total

@@ -68,6 +68,8 @@ class CampaignUpdate(CampaignWrite):
 
 class CampaignList(Pagination):
     dataset_id: UUID
+    q: str = Field(default='', max_length=200)
+    status: Literal['DRAFT','REVIEW','APPROVED','RUNNING','COMPLETED','FAILED'] | None = None
 
 
 class CampaignArchive(BaseModel):

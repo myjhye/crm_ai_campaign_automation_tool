@@ -14,6 +14,19 @@ from scripts.seed_demo import seed_demo
 pytestmark = pytest.mark.postgres
 
 
+def test_campaign_search_and_paging(context):
+    client,payload=context
+    for name in ['다시 방문 1','다시 방문 2','첫 구매','혜택 50%']:
+        assert client.post('/api/v1/campaigns',json={**payload,'name':name}).status_code==201
+    params={'dataset_id':payload['dataset_id'],'page_size':1,'q':'다시 방문','status':'DRAFT'}
+    first=client.get('/api/v1/campaigns',params=params).json()
+    second=client.get('/api/v1/campaigns',params={**params,'page':2}).json()
+    assert first['total']==2 and len(first['items'])==len(second['items'])==1
+    assert first['items'][0]['id']!=second['items'][0]['id']
+    assert client.get('/api/v1/campaigns',params={**params,'status':'COMPLETED'}).json()['total']==0
+    assert client.get('/api/v1/campaigns',params={**params,'q':'%'}).json()['total']==1
+
+
 @pytest.fixture
 def context(database):
     reference = datetime(2026,9,19,tzinfo=timezone.utc)

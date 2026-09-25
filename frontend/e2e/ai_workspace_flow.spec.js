@@ -17,6 +17,44 @@ async function setup(page,handler){
   });
 }
 const response=(result_type,data,context_hint=null)=>({message:'결과를 확인해주세요.',result_type,data,context_hint,dataset_id:did,mode:'mock'});
+test('categorized prompts and contextual followups fill without automatically sending',async({page})=>{
+  let calls=0;
+  await setup(page,async(route,path)=>{
+    if(path.endsWith('/chat')){calls++;await route.fulfill({json:response('metric',{metrics:{active_customers:{value:100,unit:'count'}}})});return true;}
+  });
+  await page.goto(`/#/ai?dataset=${did}&from=2026-08-22&to=2026-09-20`);
+  await expect(page.locator('.ai-example-groups>section')).toHaveCount(5);
+  await expect(page.locator('.ai-example')).toHaveCount(22);
+  await page.locator('.ai-example').filter({hasText:'전체 고객 수를 알려줘'}).click();
+  const input=page.getByLabel('AI에게 요청하기',{exact:true});
+  await expect(input).toHaveValue('전체 고객 수를 알려줘');expect(calls).toBe(0);
+  await input.press('Enter');
+  await expect(page.locator('.ai-followup-question')).toHaveCount(2);
+  await expect(page.locator('.ai-example-groups')).toHaveCount(0);
+  await page.locator('.ai-followup-question').first().click();
+  await expect(input).toHaveValue('활동한 고객이 실제 구매로 이어졌는지 구매 전환율을 알려줘');expect(calls).toBe(1);
+  await page.setViewportSize({width:390,height:844});
+  await expect(input).toBeInViewport();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.getByRole('button',{name:'새 대화',exact:true}).click();
+  await expect(page.locator('.ai-followup-suggestions')).toBeHidden();
+  await expect(page.locator('.ai-example')).toHaveCount(22);
+});
+test('empty comparison explains scope without claiming success even for an old API response',async({page})=>{
+  await setup(page,async(route,path)=>{
+    if(path.endsWith('/chat')){
+      await route.fulfill({json:{...response('campaign_comparison',{campaigns:[],total_matched:0,scope:'context',channel:'EMAIL',from:'2026-09-01T00:00:00Z',to:'2026-09-21T00:00:00Z'}),message:'선택한 발송 기간의 완료 캠페인을 비교했습니다.'}});
+      return true;
+    }
+  });
+  await page.goto(`/#/ai?dataset=${did}&from=2026-08-22&to=2026-09-20`);
+  await page.getByLabel('AI에게 요청하기',{exact:true}).fill('위 캠페인 중 이메일만 비교해줘');
+  await page.getByLabel('AI에게 요청하기',{exact:true}).press('Enter');
+  await expect(page.getByText('조건에 맞는 완료 캠페인이 없습니다.',{exact:true})).toBeVisible();
+  await expect(page.getByText('선택한 발송 기간의 완료 캠페인을 비교했습니다.',{exact:true})).toHaveCount(0);
+  await expect(page.locator('.ai-comparison-empty')).toContainText('이전 대화의 대상 내 조회');
+  await expect(page.locator('.ai-comparison-empty')).toContainText('EMAIL');
+});
 test('insight to saved segment to campaign proposal with retained scope and confirmation',async({page})=>{
   const requests=[];let saves=0;
   await setup(page,async(route,path)=>{
@@ -29,11 +67,12 @@ test('insight to saved segment to campaign proposal with retained scope and conf
     if(path.endsWith('/confirm')){saves++;await route.fulfill({json:saves===1?{id:sid,context_hint:hint}:{id:cid}});return true;}
   });
   await page.goto(`/#/ai?dataset=${did}&from=2026-08-22&to=2026-09-20`);
-  await expect(page.locator('.ai-insight-card')).toHaveCount(3);
+  await expect(page.locator('.ai-insight-card')).toHaveCount(0);
   await expect(page.locator('.ai-messages')).toHaveJSProperty('scrollTop',0);
-  await page.getByRole('button',{name:'이 조건으로 세그먼트 만들기'}).click();
+  await page.getByRole('button',{name:'세그먼트 저장 준비',exact:true}).click();
+  await page.locator('.ai-example:visible').first().click();
   const input=page.getByLabel('AI에게 요청하기',{exact:true});
-  await expect(input).toHaveValue(candidate);expect(requests).toHaveLength(0);
+  await expect(input).toHaveValue('60일 미구매, 누적 30만원 이상, 이메일 동의 고객을 저장할 초안으로 만들어줘');expect(requests).toHaveLength(0);
   await input.press('Enter');await expect(page.getByRole('heading',{name:'대상 고객 500명'})).toBeVisible();
   await expect(page.locator('.ai-insights')).toHaveCount(0);expect(saves).toBe(0);
   await page.getByRole('button',{name:'확인 후 세그먼트 저장'}).click();
@@ -60,7 +99,7 @@ test('scope reset, IME, insight errors and interrupted request remain usable on 
   });
   await page.setViewportSize({width:390,height:844});
   await page.goto(`/#/ai?dataset=${did}&from=2026-08-22&to=2026-09-20`);
-  await expect(page.locator('.ai-insight-card')).toHaveCount(3);
+  await expect(page.locator('.ai-insight-card')).toHaveCount(0);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   const composer=await page.locator('.ai-composer').boundingBox();
   expect(composer.y+composer.height).toBeLessThanOrEqual(844);
@@ -72,7 +111,7 @@ test('scope reset, IME, insight errors and interrupted request remain usable on 
   await page.locator('#period-from').fill('2026-08-01');await page.getByRole('button',{name:'기간 적용'}).click();
   await expect(page.locator('.ai-message-system')).toContainText('대화를 새로 시작합니다');
   await expect(page.locator('.ai-message-user')).toHaveCount(0);
-  await expect(page.locator('.ai-insight-error')).toContainText('대화는 계속 사용할 수 있습니다');
+  await expect(page.locator('.ai-question-browser')).toBeVisible();
   await input.fill('활성 고객 수를 알려줘');await input.press('Enter');await expect(page.locator('.ai-metric-value')).toHaveText('100명');
   expect(bodies[1].conversation_id).not.toBe(bodies[0].conversation_id);expect(bodies[1].context_hint).toBeUndefined();
   let release;const wait=new Promise(resolve=>{release=resolve;});

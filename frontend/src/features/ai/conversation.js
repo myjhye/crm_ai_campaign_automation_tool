@@ -7,14 +7,16 @@ export function messageNode(message,{route,signal,confirm,fill,isBusy}){
   const bubble=el('article',{className:`ai-message ai-message-${message.role}${message.saved?' ai-message-saved':''}`},el('span',{className:'sr-only',text:message.role==='user'?'나의 메시지':message.role==='system'?'시스템 안내':'AI 응답'}));
   if(!message.response){bubble.append(el('p',{text:message.content,role:message.error?'alert':null}));return bubble;}
   const response=message.response,data=response.data;
-  const card=el('section',{className:'ai-result'},el('p',{text:response.message}));
+  const card=el('section',{className:'ai-result'},el('p',{text:response.result_type==='campaign_comparison'&&!data.campaigns.length?'조건에 맞는 완료 캠페인이 없습니다.':response.message}));
   if(response.result_type==='metric')for(const [key,metric] of Object.entries(data.metrics))card.append(el('h3',{text:labels[key]||key}),el('strong',{className:'ai-metric-value',text:metric.value==null?'집계할 데이터가 없습니다':`${Number(metric.value).toLocaleString('ko-KR')}${metric.unit==='percent'?'%':'명'}`}));
   if(response.result_type==='segment_preview'){if(data.name)card.append(el('h3',{text:data.name}));card.append(renderPreview(data));}
   if(response.result_type==='campaign_comparison')card.append(comparison(data,route));
   if(response.result_type==='campaign_draft'){
     const draft=data.draft||data.payload||data;
-    card.append(el('h3',{text:draft.name}),el('p',{text:`${draft.channel} · ${draft.benefit} · 전환율 목표 ${draft.target_value}% · A/B 50:50`}),el('p',{className:'small muted',text:'목표·말투·배분은 제안 기본값입니다. 저장 후 Campaigns에서 편집할 수 있습니다.'}),
-      el('div',{className:'ai-draft-variants'},...(draft.variants||[]).map(v=>el('section',{},el('h4',{text:`${v.variant_name}안`}),el('strong',{text:v.subject||'SMS'}),el('p',{text:v.body}),el('p',{className:'small muted',text:`가설: ${v.hypothesis}`})))));
+    card.append(el('h3',{text:draft.name}),
+      el('div',{className:'ai-draft-summary'},...[["채널",draft.channel],["혜택",draft.benefit],["목표",`${draft.target_value}% 전환`]].map(([label,value])=>el('div',{},el('span',{className:'small muted',text:label}),el('strong',{text:value})))),
+      el('div',{className:'ai-draft-variants'},...(draft.variants||[]).map(v=>el('section',{},el('h4',{text:`${v.variant_name}안 · ${v.allocation_bp? v.allocation_bp/100:50}%`}),el('span',{className:'small muted',text:'제목'}),el('strong',{text:v.subject||'SMS · 제목 없음'}),el('span',{className:'small muted',text:'본문'}),el('p',{className:'ai-draft-body',text:v.body}),el('details',{},el('summary',{text:'이 문안을 제안한 이유'}),el('p',{text:v.hypothesis}))))),
+      el('p',{className:'small muted',text:'저장 후 캠페인 화면에서 내용을 수정할 수 있습니다.'}));
   }
   if(data.proposal_id){
     const segment=response.result_type==='segment_preview';

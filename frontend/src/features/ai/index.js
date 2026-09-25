@@ -2,10 +2,10 @@ import {el,button,errorMessage} from '../../components/dom.js';
 import {request,isUUID} from '../../api/client.js';
 import {store} from '../../app/store.js';
 import {apiPeriod} from '../../app/router.js';
-import {insights} from './insights.js';
 import {examples} from './examples.js';
 import {chatInput} from './input.js';
 import {messageNode} from './conversation.js';
+import {followups} from './followups.js';
 
 // Memory only: navigation restores this scope; reload clears the conversation.
 let memory=null,resetNotice=false;
@@ -18,10 +18,12 @@ export function renderAI(root,signal){
   const panel=el('section',{className:'ai-workspace ai-workspace-redesign'});
   const badge=el('span',{className:'badge',text:'연결 확인 중'});
   const results=el('div',{className:'ai-messages','aria-live':'polite',role:'log','aria-label':'대화 내용'});
-  const composer=chatInput({signal,submit,clearContext:()=>{state.hint=null;composer.context(null);},onInput:value=>{state.input=value;}});
-  const welcome=el('section',{className:'ai-welcome-message'},el('p',{className:'eyebrow',text:'AI WORKSPACE'}),el('h1',{text:'데이터에서 다음 행동까지'}),
-    el('p',{className:'muted',text:'고객을 찾고, 세그먼트를 저장하고, 여러 캠페인의 성과를 비교해보세요.'}),
-    route.dataset?insights(route,text=>composer.fill(text),signal):el('p',{text:'데이터셋을 먼저 선택해주세요.'}),examples(text=>composer.fill(text),signal));
+  const composer=chatInput({signal,submit,clearContext:()=>{state.hint=null;draw();},onInput:value=>{state.input=value;}});
+  const welcome=el('section',{className:'ai-welcome-message'},
+    el('div',{className:'ai-start-heading'},el('span',{className:'ai-start-symbol','aria-hidden':'true',text:'✦'}),
+      el('h1',{text:'어떤 고객에게, 어떤 다음 행동을 할까요?'}),
+      el('p',{className:'muted',text:'궁금한 질문을 클릭하거나, 아래에 직접 물어보세요.'})),
+    ...(!route.dataset?[el('p',{text:'데이터셋을 먼저 선택해주세요.'})]:[]),examples(text=>composer.fill(text),signal));
   const header=el('header',{className:'ai-chat-header'},el('div',{className:'panel-heading'},el('strong',{text:'✦ AI 어시스턴트'}),badge),
     button('새 대화',()=>{if(busy)return;state.messages=[];state.hint=null;state.id=crypto.randomUUID();composer.context(null);composer.fill('');draw(true);},signal));
   panel.append(header,results,composer.node);root.replaceChildren(panel);
@@ -33,6 +35,8 @@ export function renderAI(root,signal){
     const started=state.messages.some(m=>m.role==='user');
     if(!started)results.append(welcome);
     composer.context(state.hint);
+    const latest=state.messages.findLast(m=>m.role==='assistant');
+    composer.suggestions(busy?[]:followups(latest,state.hint),text=>composer.fill(text));
     if(!started)results.scrollTop=0;
     else if(scroll||nearBottom)requestAnimationFrame(()=>{if(!signal.aborted)results.scrollTop=results.scrollHeight;});
   }

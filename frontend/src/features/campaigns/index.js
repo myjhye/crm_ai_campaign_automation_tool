@@ -8,10 +8,14 @@ const validRow = r => isUUID(r?.id) && typeof r.name === 'string' && Number.isIn
 const validDetail = r => validRow(r) && Array.isArray(r.variants) && r.variants.length === 2 && Array.isArray(r.exclusion_revision_ids);
 const localTime = value => value ? new Date(Date.parse(value) + 9*3600000).toISOString().slice(0,16) : '';
 const utcTime = value => value ? new Date(`${value}:00+09:00`).toISOString() : null;
+const libraryStates = new Map();
 
 export async function renderCampaigns(root, route, signal) {
+  const listState=libraryStates.get(route.dataset)||{page:route.page||1,q:'',status:''};
+  libraryStates.set(route.dataset,listState);
+  const listUrl=()=>`/campaigns?${new URLSearchParams({dataset_id:route.dataset,page:String(listState.page),page_size:'6',q:listState.q,...(listState.status?{status:listState.status}:{})})}`;
   const [page, segments, policy, existing] = await Promise.all([
-    request(`/campaigns?dataset_id=${route.dataset}&page=${route.page || 1}`, {signal,validate:isPage(validRow)}),
+    request(listUrl(), {signal,validate:isPage(validRow)}),
     request(`/segments?dataset_id=${route.dataset}&page_size=100`, {signal}),
     request('/campaigns/copy-policy', {signal}),
     route.resource ? request(`/campaigns/${route.resource}?dataset_id=${route.dataset}`, {signal,validate:validDetail}) : Promise.resolve(null),
@@ -195,6 +199,19 @@ export async function renderCampaigns(root, route, signal) {
   },{signal});
   const list = el('aside',{className:'card campaign-library','aria-label':'저장된 캠페인'});
   const listNotice=el('p',{className:'small campaign-notice',role:'status'});
+  const listTitle=el('h2',{text:'저장된 캠페인'});
+  const search=el('input',{type:'search',value:listState.q,maxlength:200,placeholder:'캠페인 이름 검색','aria-label':'캠페인 검색'});
+  const statusFilter=el('select',{'aria-label':'캠페인 상태 필터'},...[
+    ['','모든 상태'],['DRAFT','작성 중'],['REVIEW','승인 검토 중'],['APPROVED','승인 완료'],['RUNNING','발송 중'],['COMPLETED','발송 완료'],['FAILED','발송 실패']
+  ].map(([value,text])=>el('option',{value,text})));
+  statusFilter.value=listState.status;
+  const searchForm=el('form',{className:'campaign-library-search'},search,el('button',{type:'submit',className:'button secondary',text:'검색'}));
+  const listItems=el('div',{className:'campaign-library-items'});
+  const pager=el('nav',{className:'campaign-library-pager','aria-label':'캠페인 목록 페이지'});
+  const listCount=el('p',{className:'small muted',role:'status'});
+  list.append(listTitle,searchForm,statusFilter,listCount,listNotice,pager,listItems);
+  searchForm.addEventListener('submit',event=>{event.preventDefault();listState.q=search.value.trim();listState.page=1;refreshList();},{signal});
+  statusFilter.addEventListener('change',()=>{listState.status=statusFilter.value;listState.page=1;refreshList();},{signal});
   const announce=text=>{notice.textContent=text;listNotice.textContent=text;};
   async function deleteCampaign(row, control) {
     if (row.status === 'RUNNING') {announce('모의 발송 중인 캠페인은 삭제할 수 없습니다.'); return;}
@@ -267,14 +284,34 @@ export async function renderCampaigns(root, route, signal) {
     return actions;
   }
   function drawList(rows) {
-    list.replaceChildren(el('h2',{text:`캠페인 ${rows.total}개`}),listNotice, ...rows.items.map(row =>
-      el('article',{className:`saved-segment campaign-library-item status-${row.status.toLowerCase()}`},el('h3',{text:row.name}),
-        el('p',{className:'small muted',text:`${row.channel} · ${campaignStatusLabel(row.status)}`}),campaignActions(row))),
-      button('이전',() => navigate({page:Math.max(1,(route.page||1)-1)}),signal),
-      button('다음',() => {if ((route.page||1)*rows.page_size < rows.total) navigate({page:(route.page||1)+1});},signal));
+    const pages=Math.max(1,Math.ceil(rows.total/rows.page_size));
+    listTitle.textContent=`캠페인 ${rows.total}개`;
+    listCount.textContent=rows.total?`${listState.q||listState.status?'검색 결과':'전체'} ${rows.total}개 · ${(rows.page-1)*rows.page_size+1}–${Math.min(rows.page*rows.page_size,rows.total)}개 표시`:'조건에 맞는 캠페인이 없습니다.';
+    listItems.replaceChildren(...rows.items.map(row =>
+      el('article',{className:`saved-segment campaign-library-item status-${row.status.toLowerCase()}${current?.id===row.id?' is-selected':''}`},el('h3',{text:row.name}),
+        el('p',{className:'small muted',text:`${row.channel} · ${campaignStatusLabel(row.status)}`}),campaignActions(row))));
+    const previous=button('이전',()=>{listState.page=Math.max(1,listState.page-1);refreshList();},signal,'button secondary');
+    const next=button('다음',()=>{listState.page++;refreshList();},signal,'button secondary');
+    previous.disabled=rows.page<=1;next.disabled=rows.page>=pages;
+    pager.replaceChildren(previous,el('span',{text:`${rows.page} / ${pages}`,'aria-live':'polite'}),next);
   }
-  async function refreshList() {drawList(await request(`/campaigns?dataset_id=${route.dataset}&page=${route.page||1}`,{signal,validate:isPage(validRow)}));}
+  let listRequest=0;
+  async function refreshList() {
+    const ticket=++listRequest;
+    list.setAttribute('aria-busy','true');
+    pager.querySelectorAll('button').forEach(node=>{node.disabled=true;});
+    try {
+      let rows=await request(listUrl(),{signal,validate:isPage(validRow)});
+      if(signal.aborted||ticket!==listRequest)return;
+      const last=Math.max(1,Math.ceil(rows.total/rows.page_size));
+      if(listState.page>last){listState.page=last;rows=await request(listUrl(),{signal,validate:isPage(validRow)});}
+      if(!signal.aborted&&ticket===listRequest)drawList(rows);
+    } catch(error) {
+      if(!signal.aborted&&ticket===listRequest){listNotice.textContent=errorMessage(error);pager.replaceChildren(button('목록 다시 불러오기',refreshList,signal,'button secondary'));}
+    } finally {if(ticket===listRequest)list.removeAttribute('aria-busy');}
+  }
   drawList(page);
+  if(listState.page>Math.max(1,Math.ceil(page.total/page.page_size)))refreshList();
   const fingerprint=()=>JSON.stringify([current?.id,...Object.values(fields).map(input=>input.value),...[...exclusionChecks].filter(([,input])=>input.checked).map(([id])=>id)]);
   const assistant = campaignAssistant({route,signal,isBusy:()=>busy,fingerprint,
     applyFull:(data,name)=>{
