@@ -15,6 +15,38 @@ pytestmark = pytest.mark.postgres
 COMPARE = '선택 기간에 발송된 완료 캠페인을 전환율 높은 순으로 비교해줘'
 
 
+def test_copy_request_without_saved_target_never_compares(ai_context):
+    client, app, base = ai_context
+    class WrongTool:
+        def plan(self, prompt, context):
+            return 'get_metric', {'metric':'active_customers'}, 0
+    app.state.ai_provider = WrongTool()
+    result=client.post('/api/v1/ai/chat',json={**base,'prompt':'이 고객을 대상으로 전송할 a/b 테스트 문구 추천'})
+    assert result.status_code == 200, result.text
+    assert result.json()['result_type'] == 'clarification'
+    assert '새로 조회하거나 저장하지 않았습니다' in result.json()['message']
+
+
+def test_unsaved_copy_advice_uses_recent_conditions_without_writes(ai_context,database):
+    from app.models.ai import AIActionProposal
+    client, app, base = ai_context
+    class Advice:
+        def plan(self,prompt,context):
+            assert context['advice_only']
+            assert '장바구니' in context['recent_turns'][0]['content']
+            return 'recommend_copy',{'channel':'UNSPECIFIED','rationale':'구매를 재촉하지 않는 두 접근입니다.',
+                'variants':[{'variant_name':v,'subject':'담아둔 상품을 다시 만나보세요','body':'장바구니에 담아둔 상품을 천천히 살펴보세요.','hypothesis':'재방문 유도 가설'} for v in ('A','B')]},10
+    app.state.ai_provider=Advice()
+    result=client.post('/api/v1/ai/chat',json={**base,'prompt':'추천만 해줘. 저장하지는 않을 거야.',
+        'recent_turns':[{'role':'assistant','content':'조회한 조건: 장바구니 이벤트가 있고 구매 이벤트가 없음'},
+                        {'role':'user','content':'이 고객에게 보낼 A/B 문구 추천'}]})
+    assert result.status_code==200,result.text
+    assert result.json()['result_type']=='copy_recommendation'
+    with database.sessions() as session:
+        for model in (AIActionProposal,Campaign,Segment):
+            assert session.scalar(select(func.count()).select_from(model))==0
+
+
 @pytest.mark.parametrize('repair_ok', [True, False])
 def test_repeat_buyer_condition_repair_is_bounded_and_validated(ai_context, database, repair_ok):
     import json

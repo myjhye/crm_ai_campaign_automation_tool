@@ -43,6 +43,12 @@ class CampaignSetup(BaseModel):
         return self
 
 
+class ConversationTurn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    role: Literal['user', 'assistant']
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class ChatRequest(AnalyticsQuery):
     model_config = ConfigDict(extra='forbid')
     prompt: str = Field(min_length=1, max_length=2000)
@@ -56,6 +62,7 @@ class ChatRequest(AnalyticsQuery):
     analysis_campaign_id: UUID | None = None
     conversation_id: UUID | None = None
     context_hint: ContextHint | None = None
+    recent_turns: list[ConversationTurn] = Field(default_factory=list, max_length=6)
 
     @model_validator(mode='after')
     def validation_context(self):

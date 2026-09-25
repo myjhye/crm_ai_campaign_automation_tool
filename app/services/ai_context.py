@@ -49,3 +49,9 @@ def comparison_scope(prompt, suggested='dataset'):
     if re.search(r'이메일|푸시|문자|\b(EMAIL|PUSH|SMS)\b', prompt, re.I):
         return 'dataset'
     return suggested
+
+
+def requests_copy_creation(prompt):
+    """Explicit customer-facing copy requests must not become metric comparisons."""
+    return bool(re.search(r'(문구|문안|카피|copy|제목|본문)', prompt, re.I)
+        and re.search(r'(추천|만들|작성|생성|써\s*줘|제안|recommend|write|generate)', prompt, re.I))

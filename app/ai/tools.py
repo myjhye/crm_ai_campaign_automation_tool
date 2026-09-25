@@ -45,6 +45,10 @@ COPY_PROPERTIES = {
         'required':['variant_name','subject','body','hypothesis'],'additionalProperties':False}},
     'rationale': {'type':'string'},
 }
+ADVICE_TOOLS = [tool('recommend_copy', '저장 없이 고객에게 보낼 A/B 문구 두 안을 추천합니다. 미저장 고객 조건도 사용 가능합니다. 실제 성과 수치를 만들지 않습니다.', {
+    **COPY_PROPERTIES,
+    'channel': {'type':'string','enum':['EMAIL','PUSH','SMS','UNSPECIFIED']},
+})]
 CAMPAIGN_TOOLS = [tool('create_campaign_draft','지정된 조건으로 새 캠페인 A/B 초안을 제안합니다.',COPY_PROPERTIES),
                   tool('generate_copy','선택한 캠페인의 A/B 카피 교체를 제안합니다.',COPY_PROPERTIES)]
 

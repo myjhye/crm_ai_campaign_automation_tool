@@ -1,6 +1,7 @@
 import hashlib
 import json
 import time
+import re
 from datetime import datetime, timezone, timedelta
 from uuid import UUID
 from pydantic import ValidationError
@@ -14,7 +15,7 @@ from app.schemas.segments import PreviewRequest, SegmentWrite
 from app.services import segments, analytics
 from app.services.datasets import require_dataset
 from app.schemas.policies import ValidationRequest
-from app.services.ai_context import resolve_hint, segment_hint, segment_options
+from app.services.ai_context import resolve_hint, segment_hint, segment_options, requests_copy_creation
 
 
 def payload_hash(payload):
@@ -49,6 +50,10 @@ def chat(database, settings, query, request_id, provider=None):
         provider = provider or (MockProvider() if settings.ai_mode == 'mock' else OpenAIProvider(settings))
         context = {'from': query.start.isoformat(), 'to': query.end.isoformat(), 'reference_at': query.reference_at.isoformat()}
         context.update(prior_context=hint, available_segments=options)
+        context['recent_turns'] = [{'role':turn.role,'content':safe_prompt(turn.content)} for turn in query.recent_turns]
+        context['advice_only'] = (requests_copy_creation(prompt) and not re.search(r'저장해|캠페인.*생성',prompt)) or (
+            bool(re.search(r'추천만|저장하지|저장.*않|다듬어|말투.*바꿔',prompt)) and
+            any(requests_copy_creation(t.content) or '문구 추천' in t.content for t in query.recent_turns))
         if validation_campaign:
             context['validation_campaign'] = {key: validation_campaign[key] for key in ('id','name','channel','status','version')}
         if query.context_hint and hint is None:
@@ -60,6 +65,10 @@ def chat(database, settings, query, request_id, provider=None):
                 if hint and hint['kind'] == 'segment' else '먼저 대상 세그먼트를 저장하고 해당 결과의 캠페인 초안 버튼을 눌러주세요.')}
         else:
             name, args, tokens = provider.plan(prompt, context)
+        if context['advice_only'] and name not in ('recommend_copy','clarify'):
+            name,args='clarify',{'question':'저장 없이 문구를 추천하는 요청입니다. 원하는 문구 방향을 알려주세요. 고객 조건을 새로 조회하거나 저장하지 않았습니다.'}
+        if requests_copy_creation(prompt) and name == 'compare_campaigns':
+            name, args = 'clarify', {'question':'기존 성과 비교가 아니라 A/B 문구 작성 요청으로 이해했습니다. 이 세그먼트에 사용할 채널과 혜택을 알려주세요. 예: 이메일로 15% 할인 쿠폰 문구를 만들어줘.'}
         if name == 'compare_campaigns' and isinstance(args,dict):
             args={'scope':'dataset',**args}
             from app.services.ai_context import comparison_scope
@@ -68,13 +77,21 @@ def chat(database, settings, query, request_id, provider=None):
         allowed = {'get_metric': {'metric'}, 'preview_segment': {'condition_json'}, 'create_segment_draft': {'name', 'condition_json'},
                    'clarify': {'question'}, 'validate_campaign': set(),
                    'compare_campaigns': {'filter','sort','order','limit','scope'},
-                   'prepare_campaign': {'channel','benefit','objective','brand_tone'}}
+                   'prepare_campaign': {'channel','benefit','objective','brand_tone'},
+                   'recommend_copy': {'channel','variants','rationale'}}
         if name not in allowed or not isinstance(args, dict) or set(args) != allowed[name]:
             raise ValueError('Invalid tool')
         # Re-resolve references after the external call; never trust client labels.
         with database.sessions() as check:
             if query.context_hint and resolve_hint(check, query.dataset_id, query.context_hint) != hint:
                 name, args, hint = 'clarify', {'question':'이전 대상이 변경되었습니다. 대상을 다시 선택해주세요.'}, None
+        if name == 'recommend_copy':
+            from app.ai.advice import validate_advice
+            result = validate_advice(args)
+            status = 'SUCCESS'
+            return {'message':'저장하지 않는 A/B 문구 추천입니다.', 'result_type':'copy_recommendation',
+                'data':result, 'mode':settings.ai_mode, 'dataset_id':query.dataset_id,
+                'request_id':request_id,'conversation_id':query.conversation_id,'context_hint':hint}
         if name == 'prepare_campaign':
             if not hint or hint['kind'] != 'segment':
                 name, args = 'clarify', {'question':'캠페인 대상으로 사용할 세그먼트를 먼저 저장해주세요. 저장한 결과에서 캠페인 초안으로 이어갈 수 있습니다.'}
@@ -152,6 +169,8 @@ def chat(database, settings, query, request_id, provider=None):
                                'reference_at': query.reference_at, 'data_version': version}
                     parsed = PreviewRequest.model_validate(payload)
                     result = segments.preview(session, parsed)
+                    # A new preview is not the previously saved segment.
+                    hint = None
                     kind, message = 'segment_preview', '조건과 대상 고객을 확인해주세요.'
                     if name == 'create_segment_draft':
                         write = SegmentWrite.model_validate({**payload, 'name': safe_prompt(args['name'])})
@@ -173,7 +192,7 @@ def chat(database, settings, query, request_id, provider=None):
             session.add(AIExecutionLog(dataset_id=query.dataset_id, request_id=request_id,
                 conversation_id=query.conversation_id,
                 provider=settings.ai_mode, model=settings.ai_model if settings.ai_mode == 'live' else 'fixture',
-                status=status, tool_name=name if name in ('get_metric', 'preview_segment', 'create_segment_draft', 'clarify', 'validate_campaign', 'compare_campaigns', 'prepare_campaign') else None,
+                status=status, tool_name=name if name in ('get_metric', 'preview_segment', 'create_segment_draft', 'clarify', 'validate_campaign', 'compare_campaigns', 'prepare_campaign', 'recommend_copy') else None,
                 elapsed_ms=int((time.monotonic() - started) * 1000), total_tokens=tokens))
 
 

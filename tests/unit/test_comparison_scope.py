@@ -1,5 +1,5 @@
 import pytest
-from app.services.ai_context import comparison_scope
+from app.services.ai_context import comparison_scope, requests_copy_creation
 
 
 @pytest.mark.parametrize('prompt,suggested,expected',[
@@ -13,3 +13,13 @@ from app.services.ai_context import comparison_scope
 ])
 def test_explicit_scope_overrides_model_guess(prompt,suggested,expected):
     assert comparison_scope(prompt,suggested)==expected
+
+
+@pytest.mark.parametrize('prompt,expected',[
+    ('이 고객을 대상으로 전송할 a/b 테스트 문구 추천', True),
+    ('이 세그먼트로 이메일 카피를 작성해줘', True),
+    ('위 캠페인을 클릭률로 비교해줘', False),
+    ('A/B 테스트 성과를 비교해줘', False),
+])
+def test_copy_intent_is_not_performance_comparison(prompt,expected):
+    assert requests_copy_creation(prompt) is expected
