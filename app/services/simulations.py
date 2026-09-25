@@ -61,12 +61,21 @@ def latest_run(session,dataset_id,campaign_id):
     row=session.scalar(select(CampaignRun).where(CampaignRun.dataset_id==dataset_id,CampaignRun.campaign_id==campaign_id).order_by(CampaignRun.created_at.desc()).limit(1))
     return None if row is None else get_run(session,dataset_id,campaign_id,row.id)
 
-def simulate(session,campaign_id,payload,idempotency_key,request_id):
+def simulate(session,campaign_id,payload,idempotency_key,request_id,*,seed_at=None,seed_value=None):
+    # Offline demo seeding only: these keywords are deliberately absent from the HTTP schema.
+    if (seed_at is None) != (seed_value is None):
+        raise ValueError('seed_at and seed_value must be supplied together')
+    if seed_at is not None and (seed_at.tzinfo is None or seed_at > datetime.now(timezone.utc)-timedelta(seconds=4)):
+        raise ValueError('Demo simulation time must be timezone-aware and in the past')
     if not idempotency_key or len(idempotency_key)>200: raise AppError('IDEMPOTENCY_KEY_REQUIRED','Idempotency-Key를 입력해주세요.',422)
     canonical={'dataset_id':str(payload.dataset_id),'campaign_id':str(campaign_id),'campaign_version':payload.campaign_version}
+    if seed_at is not None:
+        canonical.update(seed_at=seed_at.isoformat(),seed_value=str(seed_value))
     digest=_hash(json.dumps(canonical,sort_keys=True,separators=(',',':')))
     with session.begin():
-        require_dataset(session,payload.dataset_id,lock=True)
+        dataset=require_dataset(session,payload.dataset_id,lock=True)
+        if seed_at is not None and dataset.source!='DEMO':
+            raise ValueError('Historical simulations are limited to DEMO datasets')
         campaign=campaign_repo.get(session,payload.dataset_id,campaign_id,True)
         if campaign is None: raise AppError('NOT_FOUND','캠페인을 찾을 수 없습니다.',404)
         existing=session.scalar(select(CampaignRun).where(CampaignRun.campaign_id==campaign_id,CampaignRun.idempotency_key==idempotency_key).with_for_update())
@@ -79,7 +88,7 @@ def simulate(session,campaign_id,payload,idempotency_key,request_id):
         if approval is None or approval.status!='APPROVED': raise AppError('APPROVAL_REQUIRED','유효한 승인이 필요합니다.')
         validation=policy_repo.get_validation(session,payload.dataset_id,approval.validation_run_id,True)
         policy=policy_repr(policy_repo.setting(session,payload.dataset_id),payload.dataset_id)
-        now=datetime.now(timezone.utc)
+        now=seed_at or datetime.now(timezone.utc)
         # The 30-minute validation window protects the transition into REVIEW/APPROVED.
         # Once a visitor has approved that exact snapshot, execution may happen later as
         # long as its campaign content, policy and source data still match. Recipient
@@ -102,8 +111,11 @@ def simulate(session,campaign_id,payload,idempotency_key,request_id):
             status='EXCLUDED' if reasons else 'RESERVED'; reserved+=status=='RESERVED'
             deliveries.append(CampaignDelivery(dataset_id=payload.dataset_id,campaign_id=campaign.id,run_id=run_id,
                 customer_id=customer.id,channel=campaign.channel,status=status,exclusion_reason=reasons[0] if reasons else None))
-        seed=_hash(f'{campaign.id}:{validation.id}')
-        job=enqueue(session,dataset_id=payload.dataset_id,kind='campaign.simulate',key=f'run:{run_id}',payload={'run_id':str(run_id)})
+        seed=_hash(str(seed_value)) if seed_value is not None else _hash(f'{campaign.id}:{validation.id}')
+        job_payload={'run_id':str(run_id)}
+        if seed_at is not None:
+            job_payload['seed_at']=seed_at.isoformat()
+        job=enqueue(session,dataset_id=payload.dataset_id,kind='campaign.simulate',key=f'run:{run_id}',payload=job_payload)
         run=CampaignRun(id=run_id,dataset_id=payload.dataset_id,campaign_id=campaign.id,approval_id=approval.id,
             validation_run_id=validation.id,job_id=job.id,idempotency_key=idempotency_key,payload_hash=digest,status='PENDING',
             seed=seed,response_rates=RATES,initial_count=len(candidate_ids),reserved_count=reserved,excluded_count=len(candidate_ids)-reserved)
@@ -121,29 +133,40 @@ def simulation_job(session,job):
     if run.status=='COMPLETED': return json.loads(json.dumps(representation(run),default=str))
     campaign=campaign_repo.get(session,job.dataset_id,run.campaign_id,True)
     if campaign is None or campaign.status!='RUNNING': raise ValueError('Campaign is not running')
-    now=datetime.now(timezone.utc); event_base=now-timedelta(seconds=4); run.status='RUNNING'; run.started_at=run.started_at or event_base
+    now=datetime.now(timezone.utc); event_base=now-timedelta(seconds=4)
+    if job.payload.get('seed_at'):
+        dataset=require_dataset(session,job.dataset_id)
+        event_base=datetime.fromisoformat(job.payload['seed_at'])
+        if dataset.source!='DEMO' or event_base.tzinfo is None or event_base>now-timedelta(seconds=4):
+            raise ValueError('Invalid historical demo execution')
+        now=event_base+timedelta(seconds=4)
+    run.status='RUNNING'; run.started_at=run.started_at or event_base
     variants,_=campaign_repo.children(session,campaign)
     reserved=session.scalars(select(CampaignDelivery).where(CampaignDelivery.run_id==run.id,CampaignDelivery.status=='RESERVED').order_by(CampaignDelivery.customer_id).with_for_update()).all()
-    ordered=sorted(reserved,key=lambda row:_hash(f'{run.seed}:{row.customer_id}'))
+    identities=dict(session.execute(select(Customer.id,Customer.external_id).where(
+        Customer.dataset_id==job.dataset_id)).all()) if job.payload.get('seed_at') else {}
+    identity=lambda row:identities.get(row.customer_id,row.customer_id)
+    ordered=sorted(reserved,key=lambda row:(_hash(f'{run.seed}:{identity(row)}'),str(identity(row))))
     cutoff=len(ordered)*variants[0].allocation_bp//10000
     sent=failed=0
     for index,delivery in enumerate(ordered):
+        customer_key=identity(delivery)
         variant=variants[0] if index<cutoff else variants[1]; delivery.variant_id=variant.id
-        if _score(run.seed,delivery.customer_id,'failure')<run.response_rates['failure']:
+        if _score(run.seed,customer_key,'failure')<run.response_rates['failure']:
             delivery.status='FAILED'; delivery.exclusion_reason='SYSTEM_ERROR'; failed+=1; continue
-        delivery.status='SENT'; delivery.sent_at=now; sent+=1; first_success=sent==1
+        delivery.status='SENT'; delivery.sent_at=event_base if job.payload.get('seed_at') else now; sent+=1; first_success=sent==1
         events=[('DELIVERED',0)]
-        if campaign.channel=='EMAIL' and (first_success or _score(run.seed,delivery.customer_id,'open')<run.response_rates['open']): events.append(('OPEN',1))
-        clicked=first_success or _score(run.seed,delivery.customer_id,'click')<run.response_rates['click']
+        if campaign.channel=='EMAIL' and (first_success or _score(run.seed,customer_key,'open')<run.response_rates['open']): events.append(('OPEN',1))
+        clicked=first_success or _score(run.seed,customer_key,'click')<run.response_rates['click']
         if clicked: events.append(('CLICK',2))
-        converted=clicked and (first_success or _score(run.seed,delivery.customer_id,'conversion')<run.response_rates['conversion'])
+        converted=clicked and (first_success or _score(run.seed,customer_key,'conversion')<run.response_rates['conversion'])
         order=None
         if converted:
-            amount=Decimal(50000+(_score(run.seed,delivery.customer_id,'amount')*1000))
+            amount=Decimal(50000+(_score(run.seed,customer_key,'amount')*1000))
             order=Order(dataset_id=job.dataset_id,customer_id=delivery.customer_id,external_id=f'sim:{run.id}:{delivery.customer_id}',
                 purchased_at=event_base+timedelta(seconds=3),status='COMPLETED',amount=amount,source='SIMULATED')
             session.add(order); session.flush(); events.append(('CONVERSION',3))
-        if _score(run.seed,delivery.customer_id,'unsubscribe')<run.response_rates['unsubscribe']: events.append(('UNSUBSCRIBE',4))
+        if _score(run.seed,customer_key,'unsubscribe')<run.response_rates['unsubscribe']: events.append(('UNSUBSCRIBE',4))
         for event_type,minutes in events:
             session.add(CampaignEvent(dataset_id=job.dataset_id,campaign_id=campaign.id,run_id=run.id,delivery_id=delivery.id,
                 customer_id=delivery.customer_id,variant_id=variant.id,order_id=order.id if event_type=='CONVERSION' else None,

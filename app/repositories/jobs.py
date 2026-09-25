@@ -8,14 +8,16 @@ from sqlalchemy import and_, func, or_, select, update
 from app.models.jobs import Job
 
 
-def claim(session, lease_seconds: int):
+def claim(session, lease_seconds: int, *, job_id=None):
     now = session.scalar(select(func.clock_timestamp()))
     # Exhausted leases must not remain RUNNING forever after a final crash.
     session.execute(update(Job).where(
+        Job.id == job_id if job_id is not None else True,
         Job.status == "RUNNING", Job.lease_until <= now, Job.attempt >= Job.max_attempts,
     ).values(status="FAILED", error_code="LEASE_EXHAUSTED", lease_token=None,
              lease_until=None, finished_at=now))
     job = session.scalar(select(Job).where(
+        Job.id == job_id if job_id is not None else True,
         Job.attempt < Job.max_attempts,
         or_(and_(Job.status == "PENDING", Job.available_at <= now),
             and_(Job.status == "RUNNING", Job.lease_until <= now)),

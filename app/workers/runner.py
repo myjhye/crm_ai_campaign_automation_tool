@@ -14,9 +14,9 @@ from app.workers.handlers import HANDLERS
 logger = logging.getLogger(__name__)
 
 
-def run_once(database, settings, handlers=None):
+def run_once(database, settings, handlers=None, *, job_id=None):
     handlers = HANDLERS if handlers is None else handlers
-    job = claim_job(database.sessions, settings.worker_lease_seconds)
+    job = claim_job(database.sessions, settings.worker_lease_seconds, job_id=job_id)
     if job is None:
         return False
     stopped = threading.Event()

@@ -23,7 +23,7 @@ def describe(node, nested=False):
             return formatted + '원'
         if field == 'status': return STATUS[value]
         if isinstance(value, int):
-            unit = '일' if field == 'days_since_last_purchase' else '회' if field == 'email_opens_30d' else '건'
+            unit = '일' if field in ('days_since_last_purchase', 'days_since_signup') else '회' if field == 'email_opens_30d' else '건'
             return f'{value:,}{unit}'
         return str(value)
     if op == 'BETWEEN': return f'{label} {value_text(node.value[0])}~{value_text(node.value[1])} (양끝 포함)'

@@ -33,9 +33,9 @@ def enqueue(session, *, dataset_id, kind: str, key: str, payload: dict, max_atte
     return existing
 
 
-def claim_job(sessions, lease_seconds):
+def claim_job(sessions, lease_seconds, *, job_id=None):
     with sessions.begin() as session:
-        return repository.claim(session, lease_seconds)
+        return repository.claim(session, lease_seconds, job_id=job_id)
 
 
 def renew_lease(sessions, job_id, token, lease_seconds):
