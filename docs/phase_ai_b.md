@@ -1,6 +1,6 @@
 # AI-B — 캠페인 초안·A/B 카피 제안과 확인 적용
 
-현재 전체 초안 생성의 요청·캐시·LLM·검증·화면 반영 구현은 [캠페인 전체 초안 LLM 구현 Walkthrough](campaign_draft_llm_walkthrough.md)에 파일별로 정리했다.
+현재 전체 초안 생성의 요청·캐시·LLM·검증·화면 반영 구현은 캠페인 전체 초안 LLM 구현 Walkthrough (이전 문서 정리됨)에 파일별로 정리했다.
 
 ## 사용 방법
 

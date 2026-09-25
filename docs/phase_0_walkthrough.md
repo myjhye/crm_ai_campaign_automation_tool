@@ -2,7 +2,7 @@
 
 검증일: 2026-09-17  
 기준: 현재 작업 디렉터리의 코드와 직접 재실행한 테스트  
-관련 문서: [상세 구현 계획](detailed_implementation_plan.md), [API 계약](api_contract.md), [지표 정의](metric_definitions.md)
+관련 문서: [상세 구현 계획](detailed_implementation_plan.md), API 계약 (이전 문서 정리됨), [지표 정의](metric_definitions.md)
 
 ## 1. 어디까지 구현되었나?
 
@@ -38,7 +38,7 @@
 
 ## 3. 첫 번째 작업 — API 계약 정리
 
-[api_contract.md](api_contract.md)에 API 경로, JSON 필드명, UUID, 목록 형식, 날짜와 금액 표현을 정리했다.
+api_contract.md (이전 문서 정리됨)에 API 경로, JSON 필드명, UUID, 목록 형식, 날짜와 금액 표현을 정리했다.
 
 예를 들어 고객 목록을 나중에 구현할 때 응답 형태는 다음과 같다.
 

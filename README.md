@@ -2,9 +2,25 @@
 
 Python 3.11 이상을 사용하는 FastAPI 백엔드 기본 프로젝트입니다.
 
-`/#/ai`의 AI 어시스턴트는 실제 집계 인사이트에서 시작해 고객 조건 조회 → 세그먼트 확인 저장 → 캠페인 초안 제안으로 이어집니다. 완료 캠페인을 전환율·클릭률·매출·발송 수로 비교할 수 있으며, 업무 저장에는 별도 확인이 필요합니다. 대화는 현재 브라우저 메모리에서만 유지되고 데이터셋·기간 변경 또는 새로고침 시 초기화됩니다. [구현 파일과 검증 안내](docs/ai_assistant_workspace.md)
+`/#/ai`의 AI 어시스턴트는 업무별 질문 탐색에서 시작해 고객 조건 조회 → 세그먼트 확인 저장 → 캠페인 초안 제안으로 이어집니다. 완료 캠페인을 전환율·클릭률·매출·발송 수로 비교하고 결과에 맞는 후속 질문을 선택할 수 있습니다. 업무 저장에는 별도 확인이 필요합니다. 대화는 브라우저 메모리에서 유지되며 데이터셋·기간 변경 또는 새로고침 시 초기화됩니다. [사용법·구현 파일·실행 흐름·검증 안내](docs/ai_assistant_architecture.md)
 
 ## 설치 및 실행 (Windows PowerShell)
+
+### Windows DB driver startup errors
+
+`no pq wrapper available`와 `애플리케이션 제어 정책에서 이 파일을 차단했습니다`가 함께 나오면 Windows가 psycopg의 네이티브 DLL을 차단한 상태입니다. Docker DB가 Healthy여도 Python에서 드라이버를 불러오지 못하므로 마이그레이션과 서버가 시작되지 않습니다. 이 오류만으로 `DATABASE_URL`이 잘못됐다고 판단하지 않습니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.check_db_driver
+# 정확한 import 오류 확인
+.\.venv\Scripts\python.exe -c "import psycopg"
+```
+
+2026-09-25 로컬 재현에서는 `Microsoft-Windows-CodeIntegrity/Operational` 이벤트 3077에 `.venv\Lib\site-packages\psycopg_binary.libs\libpq-*.dll` 차단이 기록됐습니다. 정책 관리자에게 해당 이벤트와 파일 경로를 전달해 허용 가능한 드라이버 배포 또는 정책 승인을 요청해야 합니다. 파일 이름 변경·보안 기능 해제로 해결하는 방식은 실행 스크립트에 넣지 않습니다. `-ExecutionPolicy Bypass`는 PowerShell 스크립트 실행 옵션이며 이 DLL 차단을 해결하지 않습니다.
+
+드라이버 import가 성공한 뒤 기존 VS Code 실행 작업을 다시 실행합니다. `start-dev.ps1`은 이제 Docker·마이그레이션 전에 드라이버를 확인해 이 문제를 명확하게 표시합니다.
+
+### 기본 실행
 
 설치와 `.env` 설정을 한 번 마친 뒤에는 VS Code에서 **Ctrl + Shift + P → Tasks: Run Task(작업: 작업 실행) → GrowthPilot: 서버와 화면 실행**을 선택합니다. PostgreSQL 시작 → 마이그레이션 → FastAPI 실행 → 기본 브라우저 열기까지 자동으로 진행합니다. Docker Desktop은 먼저 실행해두세요.
 
@@ -102,7 +118,7 @@ HTTP와 독립적인 계산 및 검수 규칙은 `domain/`에 배치합니다.
 
 ## 단계 0 공통 규칙
 
-- [API 계약](docs/api_contract.md): JSON·페이지네이션·날짜·금액·공통 오류 응답.
+- API 계약 (이전 문서 정리됨): JSON·페이지네이션·날짜·금액·공통 오류 응답.
 - [CRM 지표 정의](docs/metric_definitions.md): 고객 상태, 기간 비교, 지표 분모와 매출 귀속 기준.
 - `app/core/errors.py`: 공통 오류와 `X-Request-ID`.
 - `app/core/time.py`: UTC 변환, Clock, 한국 날짜 범위 변환.
@@ -160,6 +176,12 @@ VS Code의 `GrowthPilot: 서버와 화면 실행` 작업은 API와 worker를 함
 ```
 
 `--size medium`은 고객 5천 명·상품 300개·주문 1만 5천 건·이벤트 10만 건, `--size demo`는 고객 1만 명·주문 3만 건·이벤트 20만 건을 생성합니다. 기준 시점 기본값은 `2026-09-20T00:00:00Z`입니다. 같은 옵션 재실행은 기존 데이터를 유지합니다. `--dataset-key fresh-1`을 추가하면 새 복사본을 만듭니다.
+
+Reports·Experiments·AI 비교 시연용 완료 캠페인은 아래 명령으로 추가합니다. 기존 샘플에 보완 합성 고객 750명과 6종 세그먼트, 3채널 완료 캠페인 12개를 만들며 같은 seed 재실행은 중복 생성하지 않습니다. 과거 발송 기간과 worker 실행 옵션은 [완료 캠페인 시연 데이터 안내](docs/demo_campaign_seeding.md)를 참고하세요.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.seed_demo_campaigns --dataset-id <UUID> --seed 42
+```
 
 CSV는 `/api/v1/data/import/{kind}/preview`에 `text/csv`로 전송하고, 반환된 배치를 `/commit`으로 확정합니다. 실행 중인 worker가 있어야 적재가 완료됩니다. CSV 예제·PowerShell 요청·중복 처리·원천 대조·보관 정리는 [단계 3 실행 안내](docs/phase_3_data_import.md)에 정리했습니다.
 
