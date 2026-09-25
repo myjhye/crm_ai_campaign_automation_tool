@@ -11,6 +11,12 @@ export function messageNode(message,{route,signal,confirm,fill,isBusy}){
   if(response.result_type==='metric')for(const [key,metric] of Object.entries(data.metrics))card.append(el('h3',{text:labels[key]||key}),el('strong',{className:'ai-metric-value',text:metric.value==null?'집계할 데이터가 없습니다':`${Number(metric.value).toLocaleString('ko-KR')}${metric.unit==='percent'?'%':'명'}`}));
   if(response.result_type==='segment_preview'){if(data.name)card.append(el('h3',{text:data.name}));card.append(renderPreview(data));}
   if(response.result_type==='campaign_comparison')card.append(comparison(data,route));
+  if(response.result_type==='copy_recommendation'){
+    card.append(el('h3',{text:'A/B 문구 아이디어'}),el('p',{className:'small muted',text:data.channel==='UNSPECIFIED'?'채널 미지정 · 일반 문구 예시':`${data.channel} · 저장되지 않은 추천`}),
+      el('div',{className:'ai-draft-variants'},...data.variants.map(v=>el('section',{},el('h4',{text:`${v.variant_name}안`}),
+        el('strong',{text:v.subject}),el('p',{className:'ai-draft-body',text:v.body}),el('details',{},el('summary',{text:'제안 의도'}),el('p',{text:v.hypothesis}))))),
+      el('p',{className:'small muted',text:data.rationale}));
+  }
   if(response.result_type==='campaign_draft'){
     const draft=data.draft||data.payload||data;
     card.append(el('h3',{text:draft.name}),

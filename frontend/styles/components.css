@@ -200,6 +200,10 @@ body:has(.ai-workspace-redesign) { height:100dvh; overflow:hidden; }
 .ai-workspace-redesign .ai-input-bar textarea { border:0; background:transparent; box-shadow:none; }
 .ai-workspace-redesign .ai-message-assistant { background:var(--surface); border-radius:18px; border-color:#e0e8e3; box-shadow:none; }
 .ai-workspace-redesign .ai-followup-suggestions { padding-bottom:4px; }
+.ai-workspace-redesign .ai-messages { overflow-anchor:none; scroll-behavior:auto; }
+.ai-new-answer { flex:none; align-self:center; margin:0 0 8px; border:1px solid var(--line); border-radius:20px; padding:8px 16px; background:var(--surface); color:var(--accent); cursor:pointer; font:inherit; font-size:13px; }
+.ai-new-answer[hidden] { display:none; }
+.ai-workspace-redesign .ai-followup-question { white-space:nowrap; max-width:none; padding:8px 12px; }
 @media(max-width:680px){
   .ai-workspace-redesign .ai-messages{padding:8px 4px 16px}
   .ai-workspace-redesign .ai-welcome-message{margin:0;padding:8px 4px 16px}

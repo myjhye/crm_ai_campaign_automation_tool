@@ -17,6 +17,54 @@ async function setup(page,handler){
   });
 }
 const response=(result_type,data,context_hint=null)=>({message:'결과를 확인해주세요.',result_type,data,context_hint,dataset_id:did,mode:'mock'});
+test('unsaved copy recommendations receive prior customer conditions and have no save action',async({page})=>{
+  let calls=0;
+  await setup(page,async(route,path)=>{
+    if(!path.endsWith('/chat'))return false;
+    calls++;
+    if(calls===1)await route.fulfill({json:response('segment_preview',{count:500,total:5750,percentage:8.7,description:'장바구니 이벤트 수 0건 초과 · 구매 이벤트 수 0건 일치',reference_at:dataset.reference_at,warnings:[],profile:{average_purchase_amount:'0',email_open_customers_30d:0,categories:[]}})});
+    else{
+      expect(route.request().postDataJSON().recent_turns.some(t=>t.content.includes('장바구니 이벤트 수'))).toBe(true);
+      await route.fulfill({json:response('copy_recommendation',{channel:'UNSPECIFIED',rationale:'저장 없는 문구 추천',variants:['A','B'].map(v=>({variant_name:v,subject:'담아둔 상품이 기다려요',body:'장바구니를 천천히 살펴보세요.',hypothesis:'재방문 유도 가설'}))})});
+    }return true;
+  });
+  await page.goto(`/#/ai?dataset=${did}&from=2026-08-22&to=2026-09-20`);
+  const input=page.getByLabel('AI에게 요청하기',{exact:true});
+  await input.fill('장바구니 미구매 고객을 찾아줘');await input.press('Enter');
+  await expect(page.getByRole('heading',{name:'대상 고객 500명'})).toBeVisible();
+  await input.fill('이 고객에게 보낼 A/B 문구 추천');await input.press('Enter');
+  await expect(page.getByRole('heading',{name:'A/B 문구 아이디어'})).toBeVisible();
+  await expect(page.locator('.ai-draft-variants section')).toHaveCount(2);
+  await expect(page.getByRole('button',{name:'확인 후 캠페인 저장'})).toHaveCount(0);
+});
+test('long answers open at their beginning and preserve readers scrolling through history',async({page})=>{
+  let calls=0,release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  await setup(page,async(route,path)=>{
+    if(path.endsWith('/chat')){
+      calls++;if(calls===2)await gate;
+      await route.fulfill({json:{...response('clarification',{}),message:'답변 시작\n'+Array(60).fill('자세한 설명을 차례대로 읽어보세요.').join('\n')}});return true;
+    }
+  });
+  await page.goto(`/#/ai?dataset=${did}&from=2026-08-22&to=2026-09-20`);
+  const input=page.getByLabel('AI에게 요청하기',{exact:true});
+  await input.fill('첫 질문');await input.press('Enter');
+  await expect(input).toBeEnabled();
+  const list=page.locator('.ai-messages');
+  await expect(page.locator('.ai-message-assistant')).toContainText('답변 시작');
+  expect(await list.evaluate(node=>node.scrollHeight-node.clientHeight-node.scrollTop)).toBeGreaterThan(400);
+  const answer=await page.locator('.ai-message-assistant').boundingBox(), box=await list.boundingBox();
+  expect(Math.abs(answer.y-box.y-16)).toBeLessThan(3);
+  await input.fill('두 번째 질문');await input.press('Enter');await expect(input).toBeDisabled();
+  await list.evaluate(node=>{node.scrollTop=0;});
+  release();await expect(input).toBeEnabled();
+  await expect(page.getByRole('button',{name:'↓ 새 답변 읽기'})).toBeVisible();
+  await expect(list).toHaveJSProperty('scrollTop',0);
+  await page.getByRole('button',{name:'↓ 새 답변 읽기'}).click();
+  const latest=await page.locator('.ai-message-assistant').last().boundingBox(), viewport=await list.boundingBox();
+  expect(Math.abs(latest.y-viewport.y-16)).toBeLessThan(3);
+  await expect(page.getByRole('button',{name:'↓ 새 답변 읽기'})).toBeHidden();
+});
 test('categorized prompts and contextual followups fill without automatically sending',async({page})=>{
   let calls=0;
   await setup(page,async(route,path)=>{
@@ -32,7 +80,7 @@ test('categorized prompts and contextual followups fill without automatically se
   await expect(page.locator('.ai-followup-question')).toHaveCount(2);
   await expect(page.locator('.ai-example-groups')).toHaveCount(0);
   await page.locator('.ai-followup-question').first().click();
-  await expect(input).toHaveValue('활동한 고객이 실제 구매로 이어졌는지 구매 전환율을 알려줘');expect(calls).toBe(1);
+  await expect(input).toHaveValue('구매 전환율을 알려줘');expect(calls).toBe(1);
   await page.setViewportSize({width:390,height:844});
   await expect(input).toBeInViewport();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);

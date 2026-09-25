@@ -18,3 +18,13 @@ test('campaign suggestions require a saved segment and its current context',()=>
   assert.match(followups(message,{kind:'segment',id:'segment'})[0].prompt,/이메일 캠페인/);
   assert.doesNotMatch(followups(message,null)[0].prompt,/이 세그먼트로/);
 });
+test('suggestion labels stay concise without discarding the underlying target condition',()=>{
+  const message=answer('segment_preview',{description:'장바구니 이벤트 수 0건 초과 · 구매 이벤트 수 0건 일치'});
+  const [suggestion]=followups(message);
+  assert.ok(suggestion.label.length<=25);
+  assert.match(suggestion.prompt,/장바구니 이벤트/);
+  for(const suggestion of followups(answer('campaign_comparison',{campaigns:[{id:'one'}]}),{kind:'campaign_list'})){
+    assert.ok(suggestion.label.length<=25);
+    assert.ok(!suggestion.label.includes('\n'));
+  }
+});
